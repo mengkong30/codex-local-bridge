@@ -1,0 +1,9 @@
+node_modules/
+*.log
+*.zip
+*.bak
+*-backup
+.env
+.env.*
+coverage/
+output/

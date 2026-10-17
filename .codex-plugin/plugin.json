@@ -1,0 +1,19 @@
+{
+  "name": "codex-local-bridge",
+  "version": "0.3.0",
+  "description": "无需密钥连接本地 Figma，读取与编辑图层、创建组件、设置文字对齐并导出 PNG/SVG。",
+  "author": {
+    "name": "mengkong30"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Local Bridge",
+    "shortDescription": "本地 Figma 读取、编辑与导出，无需密钥",
+    "longDescription": "独立社区项目，在本机读取与编辑 Figma 设计、创建组件并导出。支持多文件 connectionId、文字对齐、字体预加载和超时诊断。无需 API 密钥；本机进程仍可访问，无鉴权服务不适合不可信或多人共享环境。运行能力版本 v6。",
+    "developerName": "mengkong30",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "连接本地 Figma 并读取当前选区。"
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "codex-local-bridge",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node test-reliability.mjs && node test-security.mjs && node test-mcp.mjs",
+    "check": "node --check bridge-server.mjs && node --check mcp-server.mjs && node --check figma/code.js"
+  }
+}

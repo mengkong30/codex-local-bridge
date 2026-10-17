@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font: 13px Inter, sans-serif; margin: 16px; color: #222; }
+      .status { padding: 10px 12px; border-radius: 8px; background: #f2f2f2; }
+      .ok { background: #e8f7ed; color: #166534; }
+      .bad { background: #feecec; color: #991b1b; }
+      pre { white-space: pre-wrap; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div id="status" class="status">正在连接本地桥接…</div>
+    <pre id="details"></pre>
+    <script>
+      const baseUrl = "http://localhost:37821";
+      const statusEl = document.getElementById("status");
+      const detailsEl = document.getElementById("details");
+      let stopped = false;
+      let connectionId = null;
+      let registered = false;
+      let delivering = false;
+
+      function setStatus(text, kind) {
+        statusEl.textContent = text;
+        statusEl.className = `status ${kind || ""}`;
+      }
+
+      async function post(path, body) {
+        const response = await fetch(`${baseUrl}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        if (!response.ok) { const error = new Error(`${response.status} ${response.statusText}`); error.status = response.status; throw error; }
+        return response.json();
+      }
+
+      async function poll() {
+        while (!stopped) {
+          try {
+            if (!registered) { await new Promise(resolve => setTimeout(resolve, 200)); continue; }
+            const response = await fetch(`${baseUrl}/next?connectionId=${encodeURIComponent(connectionId)}`, { cache: "no-store" });
+            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+            const command = await response.json();
+            if (!delivering) setStatus("已连接到本地桥接", "ok");
+            if (command && command.requestId) {
+              parent.postMessage({ pluginMessage: { type: "bridge-command", ...command } }, "*");
+            }
+          } catch (error) {
+            registered = false; parent.postMessage({ pluginMessage: { type: "bridge-ready" } }, "*"); setStatus("连接中断，正在重新注册…", "bad");
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+          }
+        }
+      }
+
+      onmessage = async (event) => {
+        const message = event.data.pluginMessage;
+        if (!message) return;
+        if (message.type === "figma-info") {
+          detailsEl.textContent = JSON.stringify({connectionId, ...message.payload}, null, 2);
+          try { const registration = await post("/hello", {protocolVersion:2, connectionId, document:message.payload}); connectionId = registration.connectionId; registered = true; detailsEl.textContent = JSON.stringify({connectionId, ...message.payload}, null, 2); setStatus("已连接到本地桥接", "ok"); } catch (error) { registered = false; setStatus("注册失败：" + error.message, "bad"); setTimeout(() => parent.postMessage({pluginMessage:{type:"bridge-ready"}}, "*"), 1200); }
+        }
+        if (message.type === "bridge-progress") {
+          detailsEl.textContent = JSON.stringify(message, null, 2);
+          try { await post("/progress", {...message, connectionId}); } catch (error) { setStatus("进度回传失败：" + error.message, "bad"); }
+        }
+        if (message.type === "bridge-result") {
+          delivering = true;
+          const envelope = {...message, connectionId};
+          let attempts = 0;
+          while (!stopped) {
+            try {
+              await post("/result", envelope);
+              delivering = false;
+              setStatus(message.ok ? "命令完成，已确认回传" : "执行失败：" + message.error, message.ok ? "ok" : "bad");
+              break;
+            } catch (error) {
+              if (error.status === 409) { setStatus("结果未确认：连接已改变，请核对画布后重试", "bad"); break; }
+              setStatus("结果回传失败，正在重试（" + (++attempts) + "）", "bad");
+              await new Promise(resolve => setTimeout(resolve, Math.min(1000 * attempts, 5000)));
+            }
+          }
+        }
+      };
+
+      parent.postMessage({ pluginMessage: { type: "bridge-ready" } }, "*");
+      poll();
+    </script>
+  </body>
+</html>
+
