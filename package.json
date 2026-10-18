@@ -1,6 +1,6 @@
 {
   "name": "codex-local-bridge",
-  "version": "0.3.0",
+  "version": "0.7.2",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -8,7 +8,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node test-reliability.mjs && node test-security.mjs && node test-mcp.mjs",
-    "check": "node --check bridge-server.mjs && node --check mcp-server.mjs && node --check figma/code.js"
+    "build": "node build-runtime.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/test.mjs",
+    "test:ui": "node test-ui.cjs",
+    "scan": "node scripts/scan-public.mjs ."
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
   }
 }

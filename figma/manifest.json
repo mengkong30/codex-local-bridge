@@ -4,9 +4,22 @@
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
-  "editorType": ["figma"],
+  "editorType": [
+    "figma"
+  ],
   "networkAccess": {
-    "allowedDomains": ["none"],
-    "devAllowedDomains": ["http://localhost:37821"]
+    "allowedDomains": [
+      "none"
+    ],
+    "devAllowedDomains": [
+      "http://localhost:37821",
+      "http://localhost:37822",
+      "http://localhost:37823",
+      "http://localhost:37824",
+      "http://localhost:37825",
+      "http://localhost:37826",
+      "http://localhost:37827",
+      "http://localhost:37828"
+    ]
   }
 }

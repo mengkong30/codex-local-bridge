@@ -1,15 +1,15 @@
 {
   "name": "codex-local-bridge",
-  "version": "0.3.0",
-  "description": "无需密钥连接本地 Figma，读取与编辑图层、创建组件、设置文字对齐并导出 PNG/SVG。",
+  "version": "0.7.2",
+  "description": "本地 Figma 多 AI 页面控制、目标隔离、执行进度与可编辑设计，无需云端密钥。",
   "author": {
     "name": "mengkong30"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Local Bridge",
-    "shortDescription": "本地 Figma 读取、编辑与导出，无需密钥",
-    "longDescription": "独立社区项目，在本机读取与编辑 Figma 设计、创建组件并导出。支持多文件 connectionId、文字对齐、字体预加载和超时诊断。无需 API 密钥；本机进程仍可访问，无鉴权服务不适合不可信或多人共享环境。运行能力版本 v6。",
+    "shortDescription": "统一查看多文件与 AI，精简状态条保持连接",
+    "longDescription": "独立社区项目。一个统一主控窗口查看所有已接入的 Figma 文件、页面、AI 归属和执行状态。其他文件自动收成精简状态条，继续接收任务与回传结果。切换主控只改变显示方式，AI 的页面绑定与执行权限保持不变。每个目标文件仍需运行插件；插件 0.7.2，服务 0.7.0，Figma 执行插件 v10。 本机服务无身份鉴权，页面绑定用于路由与冲突隔离。",
     "developerName": "mengkong30",
     "category": "Productivity",
     "capabilities": [],

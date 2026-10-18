@@ -1,93 +1,255 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <style>
-      body { font: 13px Inter, sans-serif; margin: 16px; color: #222; }
-      .status { padding: 10px 12px; border-radius: 8px; background: #f2f2f2; }
-      .ok { background: #e8f7ed; color: #166534; }
-      .bad { background: #feecec; color: #991b1b; }
-      pre { white-space: pre-wrap; font-size: 11px; }
-    </style>
-  </head>
-  <body>
-    <div id="status" class="status">正在连接本地桥接…</div>
-    <pre id="details"></pre>
-    <script>
-      const baseUrl = "http://localhost:37821";
-      const statusEl = document.getElementById("status");
-      const detailsEl = document.getElementById("details");
-      let stopped = false;
-      let connectionId = null;
-      let registered = false;
-      let delivering = false;
-
-      function setStatus(text, kind) {
-        statusEl.textContent = text;
-        statusEl.className = `status ${kind || ""}`;
-      }
-
-      async function post(path, body) {
-        const response = await fetch(`${baseUrl}${path}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body)
-        });
-        if (!response.ok) { const error = new Error(`${response.status} ${response.statusText}`); error.status = response.status; throw error; }
-        return response.json();
-      }
-
-      async function poll() {
-        while (!stopped) {
-          try {
-            if (!registered) { await new Promise(resolve => setTimeout(resolve, 200)); continue; }
-            const response = await fetch(`${baseUrl}/next?connectionId=${encodeURIComponent(connectionId)}`, { cache: "no-store" });
-            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-            const command = await response.json();
-            if (!delivering) setStatus("已连接到本地桥接", "ok");
-            if (command && command.requestId) {
-              parent.postMessage({ pluginMessage: { type: "bridge-command", ...command } }, "*");
-            }
-          } catch (error) {
-            registered = false; parent.postMessage({ pluginMessage: { type: "bridge-ready" } }, "*"); setStatus("连接中断，正在重新注册…", "bad");
-            await new Promise((resolve) => setTimeout(resolve, 1200));
-          }
-        }
-      }
-
-      onmessage = async (event) => {
-        const message = event.data.pluginMessage;
-        if (!message) return;
-        if (message.type === "figma-info") {
-          detailsEl.textContent = JSON.stringify({connectionId, ...message.payload}, null, 2);
-          try { const registration = await post("/hello", {protocolVersion:2, connectionId, document:message.payload}); connectionId = registration.connectionId; registered = true; detailsEl.textContent = JSON.stringify({connectionId, ...message.payload}, null, 2); setStatus("已连接到本地桥接", "ok"); } catch (error) { registered = false; setStatus("注册失败：" + error.message, "bad"); setTimeout(() => parent.postMessage({pluginMessage:{type:"bridge-ready"}}, "*"), 1200); }
-        }
-        if (message.type === "bridge-progress") {
-          detailsEl.textContent = JSON.stringify(message, null, 2);
-          try { await post("/progress", {...message, connectionId}); } catch (error) { setStatus("进度回传失败：" + error.message, "bad"); }
-        }
-        if (message.type === "bridge-result") {
-          delivering = true;
-          const envelope = {...message, connectionId};
-          let attempts = 0;
-          while (!stopped) {
-            try {
-              await post("/result", envelope);
-              delivering = false;
-              setStatus(message.ok ? "命令完成，已确认回传" : "执行失败：" + message.error, message.ok ? "ok" : "bad");
-              break;
-            } catch (error) {
-              if (error.status === 409) { setStatus("结果未确认：连接已改变，请核对画布后重试", "bad"); break; }
-              setStatus("结果回传失败，正在重试（" + (++attempts) + "）", "bad");
-              await new Promise(resolve => setTimeout(resolve, Math.min(1000 * attempts, 5000)));
-            }
-          }
-        }
-      };
-
-      parent.postMessage({ pluginMessage: { type: "bridge-ready" } }, "*");
-      poll();
-    </script>
-  </body>
-</html>
-
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{color-scheme:light dark;--bg:var(--figma-color-bg,#fff);--fg:var(--figma-color-text,#252931);--muted:var(--figma-color-text-secondary,#626b77);--line:var(--figma-color-border,#e3e7ed);--surface:var(--figma-color-bg-secondary,#f5f7f9);--selected:var(--figma-color-bg-selected,#edf3fa);--accent:var(--figma-color-border-selected,#729ac4);--ok:#226747;--ok-bg:#eaf5ee;--warn:#8b581d;--bad:#b43737;--focus:#3578c3}
+*{box-sizing:border-box}[hidden]{display:none!important}html,body{height:100%;margin:0}body{background:var(--bg);color:var(--fg);font:12px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}::selection{background:var(--selected);color:var(--fg)}*{scrollbar-width:thin;scrollbar-color:var(--line) transparent}button{font:inherit;min-height:30px;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);cursor:pointer}button:hover:not(:disabled){background:var(--surface);border-color:var(--accent)}button:active:not(:disabled){background:var(--selected)}button:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}button:disabled{opacity:.45;cursor:default}h1,h2,p{margin:0}h1{font-size:14px;letter-spacing:-.3px;font-weight:650}h2{font-size:12px;font-weight:650}.muted{color:var(--muted)}.small{font-size:11px}.mono{font-family:ui-monospace,Consolas,monospace;overflow-wrap:anywhere}.between{display:flex;align-items:center;justify-content:space-between;gap:8px}.wrap{overflow-wrap:anywhere;min-width:0}
+#app{height:100%;display:flex;flex-direction:column;padding:16px 18px 10px;gap:7px}.top{display:flex;justify-content:space-between;align-items:center;gap:8px}.brand{display:flex;gap:9px;align-items:center;min-width:0}.mark{width:28px;height:28px;display:grid;place-items:center;background:var(--fg);color:var(--bg);border-radius:7px;flex:none}.mark svg{width:17px;height:17px}.header-actions{display:flex;align-items:center;gap:7px;flex:none}.quiet{font-size:11px;min-height:28px;padding:4px 8px;color:var(--muted)}.badge{display:inline-flex;align-items:center;white-space:nowrap;border:1px solid var(--line);border-radius:5px;padding:2px 6px;font-size:11px;color:var(--muted);font-weight:400;flex:none}.badge[data-kind=ok]{color:var(--ok);background:var(--ok-bg);border-color:transparent}.badge[data-kind=bad]{color:var(--bad)}.badge[data-kind=warn]{color:var(--warn);background:var(--surface)}#status{font-size:11px;color:var(--muted);overflow-wrap:anywhere;min-height:17px}#status[data-kind=bad]{color:var(--bad)}
+.hub-body{flex:1;overflow-y:auto;min-height:0;padding-right:4px;scrollbar-gutter:stable}.group{padding:12px 0;border-bottom:1px solid var(--line)}.group:first-child{padding-top:6px}.files{display:grid;gap:4px;max-height:144px;overflow-y:auto;margin-top:6px;padding:2px}.file-row{display:flex;align-items:center;gap:6px;min-width:0}.file-row .file-button{flex:1;min-width:0}.delete-record{flex:none}.file-button{display:block;width:100%;text-align:left;padding:7px 9px;min-width:0;border-color:transparent}.file-button[aria-pressed=true]{background:var(--selected);border-color:var(--accent)}.file-title{font-weight:600;overflow-wrap:anywhere;min-width:0}.file-sub{display:block;color:var(--muted);font-size:11px;overflow-wrap:anywhere;margin-top:2px}.file-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.file-name{font-size:16px;font-weight:650;letter-spacing:-.2px;overflow-wrap:anywhere;line-height:1.4}.viewing{font-size:11px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}.target-actions{display:flex;gap:7px;margin-top:7px;flex-wrap:wrap}.target-actions .quiet{min-height:25px;padding:2px 7px}.pages{max-height:188px;overflow-y:auto;margin-top:5px;padding-right:2px}.page{padding:8px 0;border-top:1px solid var(--line)}.page:first-child{border-top:0}.page-title{font-weight:600;overflow-wrap:anywhere}.view-tag{display:inline-block;font-size:11px;color:var(--muted);font-weight:400;margin-left:7px}.owner-line{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px}.owner{display:flex;gap:8px;min-width:0;align-items:center}.avatar{width:28px;height:28px;display:grid;place-items:center;flex:none;background:var(--selected);border:1px solid var(--line);border-radius:7px;font-size:11px;font-weight:650}.owner-name{font-weight:650;overflow-wrap:anywhere}.owner-task{color:var(--muted);font-size:11px;overflow-wrap:anywhere}.owner-state{font-size:11px;color:var(--ok);margin-left:7px;font-weight:400}.empty{color:var(--muted);font-size:11px;padding:4px 0 1px}.confirm{margin-top:8px;padding:10px;background:var(--surface);border-radius:6px}.confirm p{font-size:11px;margin-bottom:8px}.confirm-actions{display:flex;gap:6px}.danger{color:var(--bad)}
+.execution{padding:9px 10px;background:var(--surface);border:1px solid var(--line);border-radius:7px;margin-top:7px}.execution-title{font-weight:600;overflow-wrap:anywhere}.execution-meta{font-size:11px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.pulse{height:3px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:8px}.pulse:after{content:"";display:block;width:30%;height:100%;background:var(--ok);animation:run 1.8s linear infinite}@keyframes run{from{transform:translateX(-100%)}to{transform:translateX(435%)}}@media(prefers-reduced-motion:reduce){.pulse:after{animation:none;width:100%}}.notice{font-size:11px;color:var(--warn);margin-top:6px}details{font-size:11px;color:var(--muted)}summary{cursor:pointer;min-height:28px;display:list-item;padding:4px 0}#resultBox{margin-top:5px}#resultSummary[data-kind=bad]{color:var(--bad)}#lastResult{padding:5px 0;overflow-wrap:anywhere}.connection{padding-top:7px}.connection-controls{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.connection dl{display:grid;grid-template-columns:64px 1fr;gap:4px;margin:6px 0}.connection dt,.connection dd{margin:0}.footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px;color:var(--muted);font-size:11px;flex:none;font-variant-numeric:tabular-nums}
+.footer #hubLocation{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.footer>span:last-child{flex:none}.compact-only{display:none}.compact-content{min-width:0}.compact-file{font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.compact-owner{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.compact-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}.compact-caption{font-size:11px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.compact-buttons{display:flex;gap:5px;flex:none}[data-mode=compact]{padding:10px 12px!important;gap:4px!important}[data-mode=compact] .hub-only{display:none!important}[data-mode=compact] .compact-only{display:block}[data-mode=compact] h1{font-size:12px}[data-mode=compact] .mark{width:22px;height:22px;border-radius:5px}[data-mode=compact] .mark svg{width:15px;height:15px}[data-mode=compact] #status{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;min-height:15px}[data-mode=compact] .top{gap:5px}[data-mode=compact] .quiet{min-height:25px;padding:2px 7px}
+@media(max-width:350px){#app{padding:12px 11px 9px}.brand{gap:6px}h1{font-size:12px}.between{align-items:flex-start}.file-heading{align-items:flex-start}.badge{white-space:normal}.compact-buttons{gap:3px}.quiet{padding:3px 5px}}
+@media(prefers-color-scheme:dark){:root{--bg:var(--figma-color-bg,#202124);--fg:var(--figma-color-text,#eeeef1);--muted:var(--figma-color-text-secondary,#b0b6c0);--line:var(--figma-color-border,#3b414b);--surface:var(--figma-color-bg-secondary,#292d33);--selected:var(--figma-color-bg-selected,#303e50);--accent:var(--figma-color-border-selected,#6e95bd);--ok:#91dbb5;--ok-bg:#283f34;--warn:#dfb27f;--bad:#ff9292;--focus:#89b9f0}}
+.settings-body{flex:1;overflow:auto;min-height:0;padding:8px 3px 12px 0}.settings-body h2{font-size:15px;margin-bottom:5px}.settings-body label{display:block;font-weight:600;margin-top:14px}.settings-body input,.settings-body select{display:block;width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;font:inherit;margin-top:5px;min-height:34px}.settings-body input:focus-visible,.settings-body select:focus-visible{outline:2px solid var(--focus);outline-offset:2px}.settings-summary{margin-top:18px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:7px}.settings-summary dl{display:grid;grid-template-columns:76px 1fr;gap:7px;margin:8px 0}.settings-summary dt,.settings-summary dd{margin:0;overflow-wrap:anywhere}.settings-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px}#settingsResult{margin-top:10px;color:var(--muted);overflow-wrap:anywhere}#settingsResult[data-kind=bad]{color:var(--bad)}.top .header-actions{flex-shrink:1;flex-wrap:wrap;justify-content:flex-end}[data-settings=true] .hub-body,[data-settings=true] .compact-content{display:none!important}[data-settings=true] .settings-body{display:block!important}[data-settings=true]{min-height:0}[data-settings=true] .footer{display:flex!important}
+</style>
+</head>
+<body>
+<main id="app" data-mode="hub">
+ <header class="top"><div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4"/></svg></span><h1>Codex Local Bridge</h1></div><div class="header-actions"><button id="openSettings" class="quiet hub-only" type="button">设置</button><button id="minimize" class="quiet hub-only" type="button" disabled>精简</button><span id="connectionBadge" class="badge">连接中</span></div></header>
+ <p id="status" role="status" aria-live="polite">正在读取 Figma 文件…</p>
+ <div class="hub-body hub-only">
+  <section class="group" aria-labelledby="filesTitle"><div class="between"><h2 id="filesTitle">已接入文件</h2><div class="header-actions"><span id="fileCount" class="small muted">等待连接</span><button id="refreshFiles" class="quiet" type="button" disabled>刷新</button></div></div><div id="files" class="files"><p class="empty">目标文件运行插件后，会显示在这里。</p></div></section>
+  <section class="group" aria-labelledby="fileName"><div class="between"><h2 id="fileName" class="file-name">正在读取文件…</h2><span id="targetState" class="badge">等待连接</span></div><p id="viewingPage" class="viewing">页面信息加载中</p><div class="target-actions"><button id="promoteTarget" class="quiet" type="button" disabled>在此文件显示主控</button></div></section>
+  <section class="group" aria-labelledby="ownersTitle"><div class="between"><h2 id="ownersTitle" title="查看文件只切换面板内容，AI 仍操作各自绑定的页面。">页面与 AI 归属</h2><span id="ownerCount" class="small muted">等待连接</span></div><div id="pages" class="pages"></div></section>
+  <section class="group" aria-labelledby="executionTitle"><div class="between"><h2 id="executionTitle">执行状态</h2><span id="queueCount" class="small muted"></span></div><div id="execution" class="execution"><div class="execution-title">等待文件接入</div></div><details id="resultBox" hidden><summary id="resultSummary">最近结果</summary><p id="lastResult"></p></details></section>
+  <details class="connection"><summary>本窗口的连接信息</summary><p id="selfName" class="small"></p><dl><dt>连接 ID</dt><dd id="connectionId" class="mono">尚未分配</dd><dt>执行插件</dt><dd>v10 · 视觉修复与页面隔离</dd><dt>本地地址</dt><dd id="localAddress" class="mono">localhost:37821</dd></dl><div class="connection-controls"><button id="reconnect" type="button">重新连接本窗口</button><button id="disconnect" type="button" disabled>断开本窗口连接</button></div></details>
+ </div>
+ <section class="compact-only compact-content" aria-label="本文件精简状态条"><div id="compactFile" class="compact-file">正在读取文件…</div><div id="compactOwner" class="compact-owner">等待 AI 接入</div><div class="compact-bottom"><span id="compactCaption" class="compact-caption">文件连接保持运行</span><div class="compact-buttons"><button id="compactSettings" class="quiet" type="button">设置</button><button id="compactRefresh" class="quiet" type="button" disabled>刷新</button><button id="compactReconnect" class="quiet" type="button" hidden>重新连接</button><button id="promoteSelf" class="quiet" type="button" disabled>设为主控</button></div></div></section>
+ <section id="settingsPanel" class="settings-body" aria-label="连接设置" hidden>
+  <div class="between"><h2>连接设置</h2><button id="closeSettings" class="quiet" type="button">返回</button></div><p class="small muted">选择本窗口连接的本地桥接。切换服务后，AI 需要重新绑定目标。</p>
+  <label for="connectionMode">发现方式</label><select id="connectionMode"><option value="auto">自动发现可用服务</option><option value="manual">指定本地端口</option></select>
+  <label for="connectionProfile">服务配置名称</label><input id="connectionProfile" value="default" maxlength="60" autocomplete="off" spellcheck="false"><p class="small muted">同名配置共享一个服务；不同名称用于独立实例。</p>
+  <label for="connectionPort">端口</label><select id="connectionPort"></select>
+  <div class="settings-actions"><button id="applySettings" type="button">保存并连接</button><button id="scanServices" type="button">重新发现</button><button id="checkVersion" type="button">检查版本</button></div><p id="settingsResult" role="status" aria-live="polite"></p>
+  <div class="settings-summary"><h2>当前连接</h2><dl><dt>本地地址</dt><dd id="settingsEndpoint">尚未连接</dd><dt>配置 / 实例</dt><dd id="settingsInstance">尚未连接</dd><dt>插件 / 服务</dt><dd id="settingsVersions">0.7.2 / 待连接</dd><dt>执行端</dt><dd id="settingsRuntime">待连接</dd></dl><p class="small muted">版本检查针对本机已安装版本和服务协议，不查询云端更新。</p></div>
+  <p class="small muted" style="margin-top:16px">每个目标文件仍需运行插件。暂不支持创建新的 Figma 文件，可让 AI 在现有文件中新建页面。</p>
+ </section>
+ <footer class="footer hub-only"><span id="hubLocation">统一主控</span><span>插件 0.7.2 · 服务 <span id="serverVersion">待连接</span></span></footer>
+</main>
+<script>
+let baseUrl='http://localhost:37821';const el=id=>document.getElementById(id);
+const initialPort=Number(new URL(baseUrl).port),discoveryPorts=initialPort===37821?Array.from({length:8},(_,i)=>37821+i):[initialPort];
+let connectionSettings={mode:initialPort===37821?'auto':'manual',profile:initialPort===37821?'default':'port-'+initialPort,port:initialPort},settingsLoaded=false,serviceIdentity=null,discovering=null,settingsOpen=false,settingsSaveWaiter=null;
+let stopped=false,connectionId=null,registered=false,delivering=false,executing=false,blocked=false;
+let documentData=null,registering=false,pollAbort=null,snapshot=null,state=null,selectedConnectionId=null,pendingRelease=null;
+let currentMode='hub',snapshotRevision=-1,statusUntil=0;
+let manualRefreshing=false;
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const askInfo=()=>parent.postMessage({pluginMessage:{type:'bridge-ready'}},'*');
+function node(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;}
+function setStatus(text,kind='',hold=0){el('status').textContent=text;el('status').dataset.kind=kind;statusUntil=Date.now()+hold;}
+function badge(element,text,kind=''){element.textContent=text;element.dataset.kind=kind;}
+function connected(c){return c&&c.connected!==false;}
+function statusLabel(c){return !connected(c)?'已断线':c.uncertain?'结果待核对':c.busy?(c.command?.aiName?'执行中':'读取中'):c.bindings?.length?'已绑定':'空闲';}
+function statusKind(c){return !connected(c)||c.uncertain?'warn':c.busy||c.bindings?.length?'ok':'';}
+function selected(){return snapshot?.connections.find(c=>c.connectionId===selectedConnectionId)||state;}
+function setMode(mode){if(currentMode===mode)return;currentMode=mode;el('app').dataset.mode=mode;parent.postMessage({pluginMessage:{type:'bridge-panel-mode',mode}},'*');}
+async function discoverService(force=false){
+ if(discovering)return discovering;
+ discovering=(async()=>{
+  const ports=connectionSettings.mode==='manual'?[connectionSettings.port]:discoveryPorts;
+  const results=(await Promise.all(ports.map(async port=>{try{const endpoint='http://localhost:'+port,r=await fetch(endpoint+'/health',{cache:'no-store',signal:AbortSignal.timeout(900)}),h=await r.json();if(!r.ok||!h.ok||h.serverName!=='codex-local-bridge'||h.protocolVersion!==2)return null;return {...h,endpoint};}catch{return null;}}))).filter(Boolean);
+  const matching=results.filter(h=>(h.profile||'default')===connectionSettings.profile);
+  if(!matching.length)throw Error('未发现对应服务，请在 AI 中启动该配置，或检查本地端口。');
+  if(matching.length>1)throw Error('发现多个同名服务，请指定端口，避免误连。');
+  const found=matching[0];
+  if(serviceIdentity&&found.instanceId!==serviceIdentity&&(executing||delivering||blocked||state?.busy||state?.queueLength||state?.uncertain)){blocked=true;throw Error('服务实例已改变，未完成操作需先核对；不会自动切换目标。');}
+  if((found.discoveryProtocol!==1||found.controllerProtocol!==1||found.panelProtocol!==1||found.reliabilityProtocol!==1)&&initialPort===37821)throw Error('服务版本过旧，请更新到 0.7.0；当前服务 '+found.serverVersion);
+  baseUrl=found.endpoint;serviceIdentity=found.instanceId;return found;
+ })().finally(()=>{discovering=null;});return discovering;
+}
+function renderSettings(){
+ el('localAddress').textContent=baseUrl.replace('http://','');el('settingsEndpoint').textContent=registered?baseUrl:'未连接 · '+baseUrl;
+ el('settingsInstance').textContent=connectionSettings.profile+' / '+(serviceIdentity?.slice(0,8)||'待发现');el('settingsVersions').textContent='0.7.2 / '+(snapshot?.serverVersion||'待连接');el('settingsRuntime').textContent='v'+(documentData?.bridgeVersion||'?')+' · 需要 v10';
+ const busy=executing||delivering||state?.busy||state?.queueLength||state?.uncertain||registering;el('applySettings').disabled=!!busy;el('connectionPort').disabled=el('connectionMode').value!=='manual';
+}
+function showSettings(){settingsOpen=true;el('app').dataset.settings='true';el('settingsPanel').hidden=false;el('connectionMode').value=connectionSettings.mode;el('connectionProfile').value=connectionSettings.profile;el('connectionPort').value=String(connectionSettings.port);parent.postMessage({pluginMessage:{type:'bridge-settings-size',open:true}},'*');renderSettings();}
+function saveConnectionSettings(settings){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{settingsSaveWaiter=null;reject(Error('未收到偏好保存确认，请重试。'));},5000);settingsSaveWaiter={resolve:()=>{clearTimeout(timer);settingsSaveWaiter=null;resolve();},reject:error=>{clearTimeout(timer);settingsSaveWaiter=null;reject(error);}};parent.postMessage({pluginMessage:{type:'bridge-save-settings',settings}},'*');});}
+function closeSettings(){settingsOpen=false;delete el('app').dataset.settings;el('settingsPanel').hidden=true;parent.postMessage({pluginMessage:{type:'bridge-settings-size',open:false,mode:currentMode}},'*');}
+async function request(path,body,signal){
+ const response=await fetch(baseUrl+path,{method:body===undefined?'GET':'POST',cache:'no-store',headers:body===undefined?undefined:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:signal||AbortSignal.timeout(15000)});
+ const value=await response.json();if(!response.ok||value.ok===false)throw Object.assign(new Error(value.error||`HTTP ${response.status}`),{status:response.status});return value;
+}
+const post=(path,body)=>request(path,body);
+function renderFiles(){
+ const list=el('files');list.replaceChildren();const files=snapshot?.connections||[];
+ el('fileCount').textContent=registered?`${files.filter(connected).length} 个在线${files.some(c=>!connected(c))?' · 含断线记录':''}`:'未连接';
+ if(!files.length){list.append(node('p','empty',stopped?'已断开本窗口，其他文件仍由各自插件连接。':'目标文件运行插件后，会显示在这里。'));return;}
+ for(const c of files){
+  const button=node('button','file-button');button.type='button';button.dataset.connection=c.connectionId;button.setAttribute('aria-pressed',String(c.connectionId===selectedConnectionId));
+  const top=node('span','file-heading'),name=node('span','file-title',c.fileName||'未命名文件'),status=node('span','badge');badge(status,statusLabel(c),statusKind(c));top.append(name,status);
+  const ai=[...new Set((c.bindings||[]).map(b=>b.aiName))].join('、');
+  const sameName=files.filter(f=>f.fileName===c.fileName).length>1?` · ${c.connectionId.slice(0,6)}`:'';
+  const mode=c.connectionId===snapshot?.hub.connectionId?'主控窗口':c.panelProtocol===1?'精简状态条':'旧版界面';
+  button.append(top,node('span','file-sub',`${ai||'尚无 AI 绑定'} · ${mode}${c.connectionId===connectionId?' · 本窗口':''}${sameName}`));
+  button.onclick=()=>{selectedConnectionId=c.connectionId;pendingRelease=null;render();};
+  const row=node('div','file-row');row.append(button);
+  if(!connected(c)){
+   const remove=node('button','quiet danger delete-record','删除');remove.type='button';remove.title='仅删除断线记录，不删除 Figma 文件';remove.setAttribute('aria-label',`删除 ${c.fileName||'未命名文件'} 的断线记录`);
+   remove.disabled=!registered||snapshot?.hub.connectionId!==connectionId;
+   remove.onclick=async()=>{remove.disabled=true;try{await post('/panel/forget',{connectionId,targetConnectionId:c.connectionId});if(selectedConnectionId===c.connectionId)selectedConnectionId=connectionId;setStatus('已删除断线记录，Figma 文件保留。','',5000);await refresh();}catch(error){setStatus(error.message,'bad',10000);remove.disabled=false;}};
+   row.append(remove);
+  }
+  list.append(row);
+ }
+}
+async function promote(targetConnectionId){
+ try{await post('/panel/promote',{connectionId,targetConnectionId});setStatus('已切换主控显示，AI 页面绑定保持不变。','',6000);await refresh();}catch(error){setStatus(error.message,'bad',10000);}
+}
+function renderPages(c){
+ const container=el('pages');container.replaceChildren();const bindings=c?.bindings||[];
+ el('ownerCount').textContent=c?`${bindings.length} 个控制任务`:'未连接';
+ const pages=[...(c?.pages||[])].sort((a,b)=>Number(b.id===c.pageId)-Number(a.id===c.pageId)||Number(bindings.some(x=>x.pageId===b.id))-Number(bindings.some(x=>x.pageId===a.id)));
+ const rows=[...bindings.filter(b=>b.scope==='file').map(b=>({id:'file',name:'整个文件（独占）',binding:b})),...pages.map(p=>({...p,binding:bindings.find(b=>b.pageId===p.id&&b.scope!=='file')}))];
+ if(!rows.length){container.append(node('p','empty','连接后显示页面和控制它的 AI。'));return;}
+ for(const page of rows){
+  const row=node('div','page'),title=node('div','page-title',page.name);if(page.id===c.pageId)title.append(node('span','view-tag','该文件正在查看'));row.append(title);
+  const b=page.binding;
+  if(!b){row.append(node('p','empty',!connected(c)?'连接已断开，需重新核对目标':bindings.some(x=>x.scope==='file')?'由文件级任务统一控制':'空闲 · 尚无 AI 控制'));container.append(row);continue;}
+  const line=node('div','owner-line'),owner=node('div','owner'),text=node('div','wrap'),name=node('div','owner-name',b.aiName),avatar=node('span','avatar',b.aiName.slice(0,2).toUpperCase());
+  const labels={running:'执行中',queued:'排队中',idle:'已绑定',uncertain:'结果待核对',expired:'租约已到期',disconnected:'已断线'};
+  name.append(node('span','owner-state',connected(c)?labels[b.state]||'已绑定':'已断线'));text.append(name,node('div','owner-task',b.clientName));owner.append(avatar,text);line.append(owner);
+  const release=node('button','quiet','释放');release.type='button';release.setAttribute('aria-label',`释放 ${b.aiName} 对 ${page.name} 的控制`);
+  release.disabled=!registered||!connected(c)||snapshot?.hub.connectionId!==connectionId||['running','queued','uncertain'].includes(b.state);
+  release.onclick=()=>{pendingRelease=b.bindingId;renderPages(c);};line.append(release);row.append(line);
+  if(pendingRelease===b.bindingId){
+   const box=node('div','confirm');box.append(node('p','',`释放「${c.fileName} / ${page.name}」后，${b.aiName} 需要重新绑定才能继续。`));
+   const actions=node('div','confirm-actions'),confirm=node('button','danger','确认释放'),cancel=node('button','','取消');confirm.type=cancel.type='button';
+   confirm.onclick=async()=>{confirm.disabled=true;try{await post('/panel/release',{connectionId,targetConnectionId:c.connectionId,bindingId:b.bindingId});pendingRelease=null;setStatus('已释放所选页面的空闲绑定。','',6000);await refresh();}catch(error){setStatus(error.message,'bad',10000);confirm.disabled=false;}};
+   cancel.onclick=()=>{pendingRelease=null;renderPages(c);};actions.append(confirm,cancel);box.append(actions);row.append(box);
+  }
+  container.append(row);
+ }
+}
+function renderExecution(c){
+ const box=el('execution');box.replaceChildren();const command=c?.command;el('queueCount').textContent=c?.queueLength?`${c.queueLength} 条排队`:'';
+ if(!c||!registered||!connected(c)){box.append(node('div','execution-title',c&&!connected(c)?'该文件已断线':stopped?'本窗口已断开':'等待文件连接'),node('div','execution-meta','连接恢复后，需核对文件与页面绑定。'));}
+ else if(command){
+  const stages={started:'准备执行','loading-font':'加载字体',building:'构建图层','snapshot-saved':'已保存修改前快照','rolling-back':'正在回滚本次操作',undoing:'正在撤销操作',completed:'等待结果确认'},elapsed=Math.max(0,Math.floor((Date.now()-new Date(command.dispatchedAt).getTime())/1000));
+  box.append(node('div','execution-title',`${command.aiName||'文件读取'} · ${command.pageName||'文件信息'}`),node('div','execution-meta',command.clientName||command.type),node('div','execution-meta',`${stages[c.progress?.stage]||'执行中'}${c.progress?.created?` · 已创建 ${c.progress.created} 个图层`:''} · ${elapsed} 秒`));
+  if(c.uncertain)box.append(node('p','notice','执行已超时，结果尚未确认。请核对画布与结果，不要重复提交写入。'));else box.append(node('div','pulse'));
+ }else box.append(node('div','execution-title',c.bindings?.length?'已绑定，等待任务':'空闲，等待 AI 绑定'),node('div','execution-meta','不同文件独立执行，同一文件按顺序执行。'));
+ const r=c?.lastResult;el('resultBox').hidden=!r;
+ if(r){const reading=['ping','bridge-capabilities','get-document-info','get-pages','get-node','get-fonts','export-node','validate-layout','operation-history'].includes(r.type);el('resultSummary').textContent=r.ok?'最近操作已完成':reading?'最近读取未完成（查看原因）':'最近写入失败（查看原因）';el('resultSummary').dataset.kind=r.ok?'':'bad';el('lastResult').textContent=`${r.aiName||'文件读取'} · ${r.pageName||r.type}${r.error?' · '+r.error:''}`;}
+}
+function renderCompact(){
+ const self=state||documentData;
+ el('compactFile').textContent=self?.fileName||'正在读取文件…';el('compactFile').title=self?.fileName||'';
+ const bindings=state?.bindings||[],names=[...new Set(bindings.map(b=>b.aiName))].join('、');
+ const owner=!registered?'连接中断，控制归属待核对':names?`${names} · ${bindings.length} 个任务 · ${state?.command?.pageName||self?.pageName||''}`:'空闲 · 尚无 AI 绑定';
+ el('compactOwner').textContent=owner;el('compactOwner').title=owner;
+ el('compactCaption').textContent=snapshot?.hub.fileName?`主控：${snapshot.hub.fileName}`:'暂无主控窗口';
+ el('promoteSelf').disabled=!registered||blocked;el('compactReconnect').hidden=registered||blocked;
+}
+function render(){
+ if(registered&&snapshot)setMode(snapshot.hub.connectionId===connectionId?'hub':'compact');
+ const c=selected();renderFiles();
+ el('fileName').textContent=c?.fileName||documentData?.fileName||'正在读取文件…';el('viewingPage').textContent=c?`该文件正在查看 · ${c.pageName||'未知页面'}`:'页面信息加载中';
+ badge(el('targetState'),c?statusLabel(c):'等待连接',c?statusKind(c):'');
+ el('promoteTarget').disabled=!registered||!connected(c)||c?.panelProtocol!==1||c?.connectionId===snapshot?.hub.connectionId;
+ el('promoteTarget').textContent=c?.connectionId===snapshot?.hub.connectionId?'此文件正在显示主控':c&&c.panelProtocol!==1?'此文件需重开新版插件':'在此文件显示主控';
+ renderPages(c);renderExecution(c);renderCompact();
+ if(registered)badge(el('connectionBadge'),currentMode==='hub'?'主控 · 已连接':statusLabel(state),statusKind(state)||'ok');
+ el('hubLocation').textContent=`主控所在：${snapshot?.hub.fileName||'待连接'}`;el('hubLocation').title=el('hubLocation').textContent;
+ el('selfName').textContent='本窗口所在文件：'+(documentData?.fileName||'待读取');
+ const busy=!!state?.busy||!!state?.queueLength||!!state?.uncertain||delivering||executing;
+ el('disconnect').disabled=!registered||busy||registering;
+ el('reconnect').disabled=busy||blocked||registering;
+ el('minimize').disabled=!registered||blocked;
+ renderRefreshButtons();renderSettings();
+}
+function renderRefreshButtons(){for(const id of ['refreshFiles','compactRefresh']){el(id).disabled=!registered||manualRefreshing;el(id).textContent=manualRefreshing?'刷新中…':'刷新';el(id).setAttribute('aria-busy',String(manualRefreshing));}}
+async function refreshNow(){
+ if(!registered||manualRefreshing)return;manualRefreshing=true;renderRefreshButtons();
+ try{const ok=await refresh();setStatus(ok?'文件状态已刷新。':'刷新失败，请检查本文件连接。',ok?'':'bad',6000);}
+ finally{manualRefreshing=false;renderRefreshButtons();}
+}
+async function refresh(){
+ if(!registered||stopped||!connectionId)return false;const target=connectionId;
+ try{
+  const value=await request('/panel?connectionId='+encodeURIComponent(target));if(target!==connectionId||stopped)return;
+  if(value.panelProtocol!==1)throw Error('请更新到 0.5.0 桥接服务');
+  if(value.hub.revision<snapshotRevision)return true;
+  snapshotRevision=value.hub.revision;snapshot=value;state=value.self;el('serverVersion').textContent=value.serverVersion;
+  if(!value.connections.some(c=>c.connectionId===selectedConnectionId))selectedConnectionId=connectionId;
+  render();return true;
+ }catch(error){if(stopped||target!==connectionId)return false;registered=false;setMode('compact');badge(el('connectionBadge'),'连接中断','bad');setStatus('连接中断，正在重新核对本文件…','bad',10000);render();if(!executing&&!delivering&&!blocked)askInfo();return false;}
+}
+async function register(payload){
+ if(!payload||typeof payload.fileName!=='string'||typeof payload.pageId!=='string'||!Array.isArray(payload.pages)){badge(el('connectionBadge'),'文件信息异常','bad');setStatus('文件信息不完整，请重新运行新版插件。','bad',10000);return;}
+ if(!settingsLoaded){if(payload.connectionSettings)connectionSettings=payload.connectionSettings;settingsLoaded=true;}
+ documentData=payload;el('compactFile').textContent=payload.fileName;
+ if(stopped||registering||blocked){render();return;}registering=true;
+ try{
+  if(!registered)await discoverService();
+  const value=await post('/hello',{protocolVersion:2,connectionId,document:payload});if(stopped)return;
+  if(connectionId&&value.connectionId!==connectionId&&(executing||delivering)){blocked=true;registered=false;throw Error('连接身份已改变；请先核对未完成操作的结果');}
+  if(value.connectionId!==connectionId){if(!selectedConnectionId||selectedConnectionId===connectionId)selectedConnectionId=value.connectionId;snapshotRevision=-1;snapshot=null;state=null;}
+  connectionId=value.connectionId;el('connectionId').textContent=connectionId;el('serverVersion').textContent=value.serverVersion||'未知版本';
+  if(value.controllerProtocol!==1||value.panelProtocol!==1){registered=false;throw Error('服务版本不兼容，请更新桥接并重新连接。');}
+  registered=true;if(Date.now()>=statusUntil)setStatus('显示主控与 AI 页面控制相互独立。');await refresh();
+ }catch(error){registered=false;badge(el('connectionBadge'),'未连接','bad');setStatus(error.message,'bad',10000);render();}
+ finally{registering=false;render();}
+}
+async function poll(){
+ while(true){
+  if(stopped||!registered||delivering||executing||blocked){await wait(250);continue;}
+  let activePollId;try{activePollId=connectionId;pollAbort=new AbortController();const value=await request('/next?connectionId='+encodeURIComponent(connectionId),undefined,pollAbort.signal);if(value.requestId){executing=true;parent.postMessage({pluginMessage:{type:'bridge-command',...value}},'*');await refresh();}}
+  catch(error){if(stopped||activePollId!==connectionId)continue;registered=false;badge(el('connectionBadge'),'连接中断','bad');setStatus('连接中断，正在重新连接本文件…','bad',10000);render();await wait(1200);askInfo();}
+ }
+}
+onmessage=async event=>{
+ const message=event.data?.pluginMessage;if(!message||typeof message!=='object'||typeof message.type!=='string')return;
+ if(message.type==='bridge-settings-saved'){settingsSaveWaiter?.resolve();return;}
+ if(message.type==='bridge-settings-error'){settingsSaveWaiter?.reject(Error(message.error||'无法保存偏好'));return;}
+ if(message.type==='bridge-init-error'){registered=false;badge(el('connectionBadge'),'文件读取失败','bad');setStatus('读取 Figma 文件失败：'+message.error,'bad',10000);render();return;}
+ if(message.type==='figma-info')await register(message.payload);
+ if(message.type==='bridge-progress'){try{await post('/progress',{...message,connectionId});await refresh();}catch(error){setStatus('进度暂未回传：'+error.message,'bad',10000);}}
+ if(message.type==='bridge-result'){
+  delivering=true;const envelope={...message,connectionId};let attempts=0;
+  while(true){
+   try{await post('/result',envelope);delivering=false;executing=false;setStatus(message.ok?'本文件命令完成，结果已确认。':'本文件操作未完成，可在执行详情查看原因。',message.ok?'':'bad',6000);await refresh();break;}
+   catch(error){if(error.status===409){blocked=true;registered=false;badge(el('connectionBadge'),'结果待核对','bad');setStatus('结果未确认：连接已改变，请核对画布并重新运行插件。','bad',10000);render();break;}setStatus(`结果回传失败，正在重试（${++attempts}）`,'bad',10000);await wait(Math.min(1000*attempts,5000));}
+  }
+ }
+};
+function reconnect(){if(blocked||executing||delivering)return;stopped=false;registered=false;badge(el('connectionBadge'),'连接中');setStatus('正在核对并重新连接本文件…');askInfo();render();}
+for(const port of discoveryPorts){const option=node('option','',String(port));option.value=String(port);el('connectionPort').append(option);}
+el('openSettings').onclick=showSettings;el('compactSettings').onclick=showSettings;el('closeSettings').onclick=closeSettings;
+el('connectionMode').onchange=()=>{el('connectionPort').disabled=el('connectionMode').value!=='manual';};
+el('scanServices').onclick=el('checkVersion').onclick=async()=>{const button=el('checkVersion');button.disabled=true;try{const h=await discoverService(true);el('settingsResult').dataset.kind='';el('settingsResult').textContent='已发现 '+h.endpoint+' · 服务 '+h.serverVersion+' · '+(documentData?.bridgeVersion>=10?'版本兼容':'需重新打开 v10 插件');renderSettings();}catch(error){el('settingsResult').dataset.kind='bad';el('settingsResult').textContent=error.message;}finally{button.disabled=false;}};
+el('applySettings').onclick=async()=>{
+ if(executing||delivering||state?.busy||state?.uncertain||state?.queueLength)return;
+ const next={mode:el('connectionMode').value,profile:el('connectionProfile').value.trim().toLowerCase(),port:Number(el('connectionPort').value)};
+ if(!/^[\w.-]{1,60}$/.test(next.profile)||!discoveryPorts.includes(next.port)){el('settingsResult').textContent='配置名称只能使用字母、数字、点、横线和下划线。';return;}
+ el('applySettings').disabled=true;
+ try{await saveConnectionSettings(next);if(registered)await post('/disconnect',{connectionId});pollAbort?.abort();registered=false;connectionId=null;state=null;snapshot=null;snapshotRevision=-1;selectedConnectionId=null;serviceIdentity=null;connectionSettings=next;stopped=false;
+  await discoverService(true);askInfo();el('settingsResult').textContent='已保存，正在连接所选服务；AI 需要重新绑定。';
+ }catch(error){el('settingsResult').dataset.kind='bad';el('settingsResult').textContent=error.message;}finally{render();}
+};
+el('reconnect').onclick=reconnect;el('compactReconnect').onclick=reconnect;
+el('refreshFiles').onclick=refreshNow;el('compactRefresh').onclick=refreshNow;
+el('promoteSelf').onclick=()=>promote(connectionId);el('promoteTarget').onclick=()=>{const c=selected();if(c)promote(c.connectionId);};
+el('minimize').onclick=async()=>{try{await post('/panel/compact',{connectionId});await refresh();}catch(error){setStatus(error.message,'bad',10000);}};
+el('disconnect').onclick=async()=>{
+ el('disconnect').disabled=true;
+ try{await post('/disconnect',{connectionId});stopped=true;registered=false;pollAbort?.abort();snapshot=null;state=null;selectedConnectionId=null;pendingRelease=null;connectionId=null;setMode('compact');badge(el('connectionBadge'),'已断开');el('connectionId').textContent='已断开';setStatus('本窗口已断开，其他文件的连接保持独立。');render();}
+ catch(error){setStatus(error.message,'bad',10000);render();}
+};
+setInterval(()=>{if(!stopped&&!blocked)askInfo();},5000);
+setInterval(()=>{refresh();},1500);
+setTimeout(()=>{if(!documentData&&!stopped){badge(el('connectionBadge'),'文件未就绪','bad');setStatus('尚未收到文件信息，请重新运行新版 Figma 插件。','bad',10000);render();}},8000);
+askInfo();poll();
+</script>
+</body></html>
