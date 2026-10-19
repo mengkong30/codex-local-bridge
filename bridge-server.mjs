@@ -32,7 +32,7 @@ function electHub() {
 }
 function hubInfo() { return {connectionId:hubConnectionId, fileName:sessions.get(hubConnectionId)?.document.fileName || null, revision:hubRevision}; }
 function panelState(s) {
-  return {ok:true, serverVersion:VERSION, instanceId, apiProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, panelProtocol:1, self:info(s), hub:hubInfo(),
+  return {ok:true, serverVersion:VERSION, instanceId, apiProtocol:1, recoveryProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, panelProtocol:1, self:info(s), hub:hubInfo(),
     connections:[...sessions.values()].filter(active).map(info).concat([...offlineSessions.values()])};
 }
 const origins = new Set(['null', 'https://www.figma.com', 'https://figma.com']);
@@ -43,6 +43,10 @@ const isWrite = c => writes.has(c.type) && !(c.type === 'design-system' && c.act
 const needsFile = c => apiContract.fileWrites.includes(c.type) || c.type==='instance-action'&&!!c.componentKey || c.type === 'import-image' || c.type === 'create-variable-collection' || c.type === 'design-system' && fileActions.has(c.action) || c.type === 'batch' && (c.commands||[]).some(needsFile);
 const fail = (message, status = 409) => { throw Object.assign(new Error(message), {status}); };
 const active = s => s && !s.disconnected && !s.retired && Date.now() - s.seen < TTL;
+function touchSession(s) {
+  if(s.disconnected)fail('Target connection was explicitly disconnected');
+  s.seen=Date.now();s.retired=false;delete s.disconnectedAt;offlineSessions.delete(s.id);
+}
 const used = id => [...requests.values()].some(t => t.bindingId === id) || [...sessions.values()].some(s => s.commandInfo?.bindingId === id);
 function sweep() {
   for(const [id,o] of operations) if(o.finishedAt && Date.now()-o.finishedAt>operationTtl){operations.delete(id);if(o.key)idempotency.delete(o.key);}
@@ -123,7 +127,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && !/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) fail('application/json required', 415);
     if (Number(req.headers['content-length']) > MAX_BODY) fail('Request body exceeds 32 MiB', 413);
     sweep(); const url = new URL(req.url, `http://${host}:${port}`), path = url.pathname;
-    if (req.method === 'GET' && path === '/health') return json(res, 200, {ok:true, serverName:'codex-local-bridge', protocolVersion:2, serverVersion:VERSION, instanceId, apiProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, controllerProtocol:1, panelProtocol:1, hub:hubInfo(), figmaConnected:[...sessions.values()].some(active), connections:[...sessions.values()].filter(active).map(info)});
+    if (req.method === 'GET' && path === '/health') return json(res, 200, {ok:true, serverName:'codex-local-bridge', protocolVersion:2, serverVersion:VERSION, instanceId, apiProtocol:1, recoveryProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, controllerProtocol:1, panelProtocol:1, hub:hubInfo(), figmaConnected:[...sessions.values()].some(active), connections:[...sessions.values()].filter(active).map(info)});
     if (req.method === 'GET' && path === '/operations') {
       const clientId=url.searchParams.get('clientId');client(clientId);
       const key=url.searchParams.get('idempotencyKey'), connectionId=url.searchParams.get('connectionId');
@@ -144,10 +148,16 @@ const server = http.createServer(async (req, res) => {
     if (path === '/hello') {
       if (p.protocolVersion !== 2) fail('Updated Figma plugin required: protocolVersion 2', 400);
       let s = sessions.get(p.connectionId);
+      // An expired worker must acknowledge its exact in-flight request before
+      // resuming. Never replace an unresolved connection with a second writer.
+      if(s?.busy){
+        if((!active(s)||p.activeRequestId)&&p.activeRequestId!==s.busy)fail('Connection has an unfinished request; resume with its exact activeRequestId');
+        touchSession(s);
+      }else if(p.activeRequestId)fail('Active request is unknown to this service; verify its outcome before reconnecting');
       if (!active(s)) { s = {id:randomUUID(), queue:[], busy:null, uncertain:false, waiter:null}; sessions.set(s.id, s); }
       s.document = p.document || {}; s.seen = Date.now();
       electHub();
-      return json(res, 200, {ok:true, connectionId:s.id, serverVersion:VERSION, instanceId, apiProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, controllerProtocol:1, panelProtocol:1, hub:hubInfo()});
+      return json(res, 200, {ok:true, connectionId:s.id, serverVersion:VERSION, instanceId, apiProtocol:1, recoveryProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, controllerProtocol:1, panelProtocol:1, hub:hubInfo()});
     }
     if (path === '/panel/promote') {
       const caller = session(p.connectionId), target = session(p.targetConnectionId || p.connectionId);
@@ -206,7 +216,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (path === '/progress') {
       const s = sessions.get(p.connectionId); if (!s || s.busy !== p.requestId) fail('Progress does not match active request');
-      s.seen = Date.now(); s.progress = {requestId:p.requestId, stage:p.stage, elapsedMs:p.elapsedMs, font:p.font, created:p.created, nodeName:p.nodeName, receivedAt:new Date().toISOString()};
+      touchSession(s);electHub();s.progress = {requestId:p.requestId, stage:p.stage, elapsedMs:p.elapsedMs, font:p.font, created:p.created, nodeName:p.nodeName, changedNodes:p.changedNodes,restoredNodes:p.restoredNodes,totalNodes:p.totalNodes,receivedAt:new Date().toISOString()};
       return json(res, 200, {ok:true});
     }
     if (path === '/result') {
@@ -217,7 +227,7 @@ const server = http.createServer(async (req, res) => {
       completed.set(p.requestId, {connectionId:s.id}); if (completed.size > 256) completed.delete(completed.keys().next().value);
       settleOperation({requestId:p.requestId,dispatched:true},200,{...p,connectionId:s.id});
       const b = bindings.get(s.commandInfo?.bindingId); if (b) b.expiresAt = Date.now() + LEASE;
-      s.seen = Date.now(); s.busy = null; s.uncertain = false; s.commandInfo = null;
+      touchSession(s);s.busy = null; s.uncertain = false; s.commandInfo = null;electHub();
       if (task) finish(task, 200, {...p, connectionId:s.id}); pump(s); return json(res, 200, {ok:true});
     }
     if (path === '/command') {

@@ -1,6 +1,6 @@
 {
   "name": "codex-local-bridge",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -11,7 +11,7 @@
     "build": "node build-runtime.mjs",
     "check": "node scripts/check.mjs",
     "test": "node scripts/test.mjs",
-    "test:ui": "node test-ui.cjs",
+    "test:ui": "node test-ui.cjs && node test-ui-recovery.cjs",
     "scan": "node scripts/scan-public.mjs ."
   },
   "devDependencies": {

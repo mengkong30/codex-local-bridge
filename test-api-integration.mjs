@@ -22,7 +22,7 @@ try {
  const document={fileName:'Expanded API fixture',pageId:page.id,pageName:page.name,pages:[{id:page.id,name:page.name}],bridgeVersion:11,editorType:'figma'};
  const connectionId=(await post('/hello',{protocolVersion:2,document})).connectionId;
  worker=(async()=>{while(running){let incoming;try{incoming=await(await fetch(base+'/next?connectionId='+connectionId)).json();}catch{break;}if(!incoming.command)continue;messages.length=0;await figma.ui.onmessage({type:'bridge-command',...incoming});const result=messages.findLast(m=>m.type==='bridge-result');await post('/result',{connectionId,...result});}})();
- assert.equal((await rpc('initialize')).result.serverInfo.version,'0.8.0');
+ assert.equal((await rpc('initialize')).result.serverInfo.version,'0.8.1');
  assert.equal((await rpc('tools/list')).result.tools.length,17);
  const capabilities=parse(await call('local_figma_capabilities',{connectionId}));assert.equal(capabilities.version,11);assert.ok(capabilities.api.commands.includes('import-library'));
  const binding=parse(await call('local_figma_bind',{connectionId,pageId:page.id,clientName:'Expanded acceptance',aiName:'Codex'})).binding;

@@ -32,16 +32,17 @@
   <label for="connectionProfile">服务配置名称</label><input id="connectionProfile" value="default" maxlength="60" autocomplete="off" spellcheck="false"><p class="small muted">同名配置共享一个服务；不同名称用于独立实例。</p>
   <label for="connectionPort">端口</label><select id="connectionPort"></select>
   <div class="settings-actions"><button id="applySettings" type="button">保存并连接</button><button id="scanServices" type="button">重新发现</button><button id="checkVersion" type="button">检查版本</button></div><p id="settingsResult" role="status" aria-live="polite"></p>
-  <div class="settings-summary"><h2>当前连接</h2><dl><dt>本地地址</dt><dd id="settingsEndpoint">尚未连接</dd><dt>配置 / 实例</dt><dd id="settingsInstance">尚未连接</dd><dt>插件 / 服务</dt><dd id="settingsVersions">0.8.0 / 待连接</dd><dt>执行端</dt><dd id="settingsRuntime">待连接</dd></dl><p class="small muted">版本检查针对本机已安装版本和服务协议，不查询云端更新。</p></div>
+  <div class="settings-summary"><h2>当前连接</h2><dl><dt>本地地址</dt><dd id="settingsEndpoint">尚未连接</dd><dt>配置 / 实例</dt><dd id="settingsInstance">尚未连接</dd><dt>插件 / 服务</dt><dd id="settingsVersions">0.8.1 / 待连接</dd><dt>执行端</dt><dd id="settingsRuntime">待连接</dd></dl><p class="small muted">版本检查针对本机已安装版本和服务协议，不查询云端更新。</p></div>
   <p class="small muted" style="margin-top:16px">每个目标文件仍需运行插件。暂不支持创建新的 Figma 文件，可让 AI 在现有文件中新建页面。</p>
  </section>
- <footer class="footer hub-only"><span id="hubLocation">统一主控</span><span>插件 0.8.0 · 服务 <span id="serverVersion">待连接</span></span></footer>
+ <footer class="footer hub-only"><span id="hubLocation">统一主控</span><span>插件 0.8.1 · 服务 <span id="serverVersion">待连接</span></span></footer>
 </main>
 <script>
 let baseUrl='http://localhost:37821';const el=id=>document.getElementById(id);
 const initialPort=Number(new URL(baseUrl).port),discoveryPorts=initialPort===37821?Array.from({length:8},(_,i)=>37821+i):[initialPort];
 let connectionSettings={mode:initialPort===37821?'auto':'manual',profile:initialPort===37821?'default':'port-'+initialPort,port:initialPort},settingsLoaded=false,serviceIdentity=null,discovering=null,settingsOpen=false,settingsSaveWaiter=null;
 let stopped=false,connectionId=null,registered=false,delivering=false,executing=false,blocked=false;
+let activeRequest=null;
 let documentData=null,registering=false,pollAbort=null,snapshot=null,state=null,selectedConnectionId=null,pendingRelease=null;
 let currentMode='hub',snapshotRevision=-1,statusUntil=0;
 let manualRefreshing=false;
@@ -65,20 +66,20 @@ async function discoverService(force=false){
   if(matching.length>1)throw Error('发现多个同名服务，请指定端口，避免误连。');
   const found=matching[0];
   if(serviceIdentity&&found.instanceId!==serviceIdentity&&(executing||delivering||blocked||state?.busy||state?.queueLength||state?.uncertain)){blocked=true;throw Error('服务实例已改变，未完成操作需先核对；不会自动切换目标。');}
-  if((found.apiProtocol!==1||found.discoveryProtocol!==1||found.controllerProtocol!==1||found.panelProtocol!==1||found.reliabilityProtocol!==1)&&initialPort===37821)throw Error('服务版本过旧，请更新到 0.8.0；当前服务 '+found.serverVersion);
+  if((found.apiProtocol!==1||found.recoveryProtocol!==1||found.discoveryProtocol!==1||found.controllerProtocol!==1||found.panelProtocol!==1||found.reliabilityProtocol!==1)&&initialPort===37821)throw Error('服务版本过旧，请更新到 0.8.1；当前服务 '+found.serverVersion);
   baseUrl=found.endpoint;serviceIdentity=found.instanceId;return found;
  })().finally(()=>{discovering=null;});return discovering;
 }
 function renderSettings(){
  el('localAddress').textContent=baseUrl.replace('http://','');el('settingsEndpoint').textContent=registered?baseUrl:'未连接 · '+baseUrl;
- el('settingsInstance').textContent=connectionSettings.profile+' / '+(serviceIdentity?.slice(0,8)||'待发现');el('settingsVersions').textContent='0.8.0 / '+(snapshot?.serverVersion||'待连接');el('settingsRuntime').textContent='v'+(documentData?.bridgeVersion||'?')+' · 需要 v11';
+ el('settingsInstance').textContent=connectionSettings.profile+' / '+(serviceIdentity?.slice(0,8)||'待发现');el('settingsVersions').textContent='0.8.1 / '+(snapshot?.serverVersion||'待连接');el('settingsRuntime').textContent='v'+(documentData?.bridgeVersion||'?')+' · 需要 v11';
  const busy=executing||delivering||state?.busy||state?.queueLength||state?.uncertain||registering;el('applySettings').disabled=!!busy;el('connectionPort').disabled=el('connectionMode').value!=='manual';
 }
 function showSettings(){settingsOpen=true;el('app').dataset.settings='true';el('settingsPanel').hidden=false;el('connectionMode').value=connectionSettings.mode;el('connectionProfile').value=connectionSettings.profile;el('connectionPort').value=String(connectionSettings.port);parent.postMessage({pluginMessage:{type:'bridge-settings-size',open:true}},'*');renderSettings();}
 function saveConnectionSettings(settings){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{settingsSaveWaiter=null;reject(Error('未收到偏好保存确认，请重试。'));},5000);settingsSaveWaiter={resolve:()=>{clearTimeout(timer);settingsSaveWaiter=null;resolve();},reject:error=>{clearTimeout(timer);settingsSaveWaiter=null;reject(error);}};parent.postMessage({pluginMessage:{type:'bridge-save-settings',settings}},'*');});}
 function closeSettings(){settingsOpen=false;delete el('app').dataset.settings;el('settingsPanel').hidden=true;parent.postMessage({pluginMessage:{type:'bridge-settings-size',open:false,mode:currentMode}},'*');}
-async function request(path,body,signal){
- const response=await fetch(baseUrl+path,{method:body===undefined?'GET':'POST',cache:'no-store',headers:body===undefined?undefined:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:signal||AbortSignal.timeout(15000)});
+async function request(path,body,signal,endpoint=baseUrl){
+ const response=await fetch(endpoint+path,{method:body===undefined?'GET':'POST',cache:'no-store',headers:body===undefined?undefined:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:signal||AbortSignal.timeout(15000)});
  const value=await response.json();if(!response.ok||value.ok===false)throw Object.assign(new Error(value.error||`HTTP ${response.status}`),{status:response.status});return value;
 }
 const post=(path,body)=>request(path,body);
@@ -136,7 +137,7 @@ function renderExecution(c){
  const box=el('execution');box.replaceChildren();const command=c?.command;el('queueCount').textContent=c?.queueLength?`${c.queueLength} 条排队`:'';
  if(!c||!registered||!connected(c)){box.append(node('div','execution-title',c&&!connected(c)?'该文件已断线':stopped?'本窗口已断开':'等待文件连接'),node('div','execution-meta','连接恢复后，需核对文件与页面绑定。'));}
  else if(command){
-  const stages={started:'准备执行','loading-font':'加载字体',building:'构建图层','snapshot-saved':'已保存修改前快照','rolling-back':'正在回滚本次操作',undoing:'正在撤销操作',completed:'等待结果确认'},elapsed=Math.max(0,Math.floor((Date.now()-new Date(command.dispatchedAt).getTime())/1000));
+  const stages={started:'准备执行','loading-font':'加载字体',building:'构建图层','snapshot-saved':'已保存修改前快照','rolling-back':'正在回滚本次操作',undoing:'正在撤销操作',restoring:'恢复已变化的图层',completed:'等待结果确认'},elapsed=Math.max(0,Math.floor((Date.now()-new Date(command.dispatchedAt).getTime())/1000));
   box.append(node('div','execution-title',`${command.aiName||'文件读取'} · ${command.pageName||'文件信息'}`),node('div','execution-meta',command.clientName||command.type),node('div','execution-meta',`${stages[c.progress?.stage]||'执行中'}${c.progress?.created?` · 已创建 ${c.progress.created} 个图层`:''} · ${elapsed} 秒`));
   if(c.uncertain)box.append(node('p','notice','执行已超时，结果尚未确认。请核对画布与结果，不要重复提交写入。'));else box.append(node('div','pulse'));
  }else box.append(node('div','execution-title',c.bindings?.length?'已绑定，等待任务':'空闲，等待 AI 绑定'),node('div','execution-meta','不同文件独立执行，同一文件按顺序执行。'));
@@ -193,7 +194,7 @@ async function register(payload){
  if(stopped||registering||blocked){render();return;}registering=true;
  try{
   if(!registered)await discoverService();
-  const value=await post('/hello',{protocolVersion:2,connectionId,document:payload});if(stopped)return;
+  const value=await post('/hello',{protocolVersion:2,connectionId,document:payload,...(activeRequest?{activeRequestId:activeRequest.requestId}:{})});if(stopped)return;
   if(connectionId&&value.connectionId!==connectionId&&(executing||delivering)){blocked=true;registered=false;throw Error('连接身份已改变；请先核对未完成操作的结果');}
   if(value.connectionId!==connectionId){if(!selectedConnectionId||selectedConnectionId===connectionId)selectedConnectionId=value.connectionId;snapshotRevision=-1;snapshot=null;state=null;}
   connectionId=value.connectionId;el('connectionId').textContent=connectionId;el('serverVersion').textContent=value.serverVersion||'未知版本';
@@ -205,7 +206,7 @@ async function register(payload){
 async function poll(){
  while(true){
   if(stopped||!registered||delivering||executing||blocked){await wait(250);continue;}
-  let activePollId;try{activePollId=connectionId;pollAbort=new AbortController();const value=await request('/next?connectionId='+encodeURIComponent(connectionId),undefined,pollAbort.signal);if(value.requestId){executing=true;parent.postMessage({pluginMessage:{type:'bridge-command',...value}},'*');await refresh();}}
+  let activePollId;try{activePollId=connectionId;pollAbort=new AbortController();const value=await request('/next?connectionId='+encodeURIComponent(connectionId),undefined,pollAbort.signal);if(value.requestId){activeRequest={requestId:value.requestId,connectionId:activePollId,instanceId:serviceIdentity,endpoint:baseUrl};executing=true;parent.postMessage({pluginMessage:{type:'bridge-command',...value}},'*');await refresh();}}
   catch(error){if(stopped||activePollId!==connectionId)continue;registered=false;badge(el('connectionBadge'),'连接中断','bad');setStatus('连接中断，正在重新连接本文件…','bad',10000);render();await wait(1200);askInfo();}
  }
 }
@@ -215,11 +216,14 @@ onmessage=async event=>{
  if(message.type==='bridge-settings-error'){settingsSaveWaiter?.reject(Error(message.error||'无法保存偏好'));return;}
  if(message.type==='bridge-init-error'){registered=false;badge(el('connectionBadge'),'文件读取失败','bad');setStatus('读取 Figma 文件失败：'+message.error,'bad',10000);render();return;}
  if(message.type==='figma-info')await register(message.payload);
- if(message.type==='bridge-progress'){try{await post('/progress',{...message,connectionId});await refresh();}catch(error){setStatus('进度暂未回传：'+error.message,'bad',10000);}}
+ if(message.type==='bridge-progress'&&activeRequest?.requestId===message.requestId){const route=activeRequest;try{await request('/progress',{...message,connectionId:route.connectionId},undefined,route.endpoint);await refresh();}catch(error){setStatus('进度暂未回传：'+error.message,'bad',10000);}}
  if(message.type==='bridge-result'){
-  delivering=true;const envelope={...message,connectionId};let attempts=0;
+  if(activeRequest?.requestId!==message.requestId)return;
+  delivering=true;const route=activeRequest,envelope={...message,connectionId:route.connectionId};let attempts=0;
   while(true){
-   try{await post('/result',envelope);delivering=false;executing=false;setStatus(message.ok?'本文件命令完成，结果已确认。':'本文件操作未完成，可在执行详情查看原因。',message.ok?'':'bad',6000);await refresh();break;}
+   try{await request('/result',envelope,undefined,route.endpoint);delivering=false;executing=false;activeRequest=null;
+    if(connectionId===route.connectionId&&serviceIdentity===route.instanceId){blocked=false;setStatus(message.ok?'本文件命令完成，结果已确认。':'本文件操作未完成，可在执行详情查看原因。',message.ok?'':'bad',6000);if(registered)await refresh();if(!registered)await register(documentData);}
+    else{blocked=true;registered=false;setStatus('结果已在原连接确认，请重新核对当前文件连接。','bad',10000);render();}break;}
    catch(error){if(error.status===409){blocked=true;registered=false;badge(el('connectionBadge'),'结果待核对','bad');setStatus('结果未确认：连接已改变，请核对画布并重新运行插件。','bad',10000);render();break;}setStatus(`结果回传失败，正在重试（${++attempts}）`,'bad',10000);await wait(Math.min(1000*attempts,5000));}
   }
  }

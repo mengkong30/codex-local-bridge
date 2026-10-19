@@ -27,39 +27,52 @@ async function captureState(command,enforceLimit=true){
  if(enforceLimit&&canonical(state).length>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 24 MiB; split the operation before writing');
  return state;
 }
-async function restoreState(before,command){
- const errors=[];const attempt=async(label,fn)=>{try{await fn();}catch(e){errors.push({step:label,error:e.message});}};
- const now=await captureState(command,false),ids=new Set(before.nodes.map(n=>n.id));
+async function restoreState(before,command,progress=()=>{},currentState=null){
+ const errors=[];const attempt=async(label,fn)=>{try{await fn();}catch(e){errors.push({step:label,error:errorMessage(e)});}};
+ const now=currentState||await captureState(command,false),ids=new Set(before.nodes.map(n=>n.id)),current=new Map(now.nodes.map(n=>[n.id,n]));
+ const topologyChanged=now.nodes.some(s=>!ids.has(s.id))||before.nodes.some(s=>{const a=current.get(s.id);return !a||a.parentId!==s.parentId||a.index!==s.index;});
+ const loadedFonts=new Set();
+ async function loadFonts(fonts){for(const font of fonts){const key=canonical(font);if(loadedFonts.has(key))continue;await figma.loadFontAsync(font);loadedFonts.add(key);}}
  // Restore original topology before removing created containers (e.g. variant sets).
- for(const s of before.nodes){const n=await figma.getNodeByIdAsync(s.id);if(!n){errors.push({step:s.id,error:'Original node was removed'});continue;}
+ for(const s of before.nodes){const previous=current.get(s.id);if(!previous){errors.push({step:s.id,error:'Original node was removed'});continue;}
+  if(previous.parentId===s.parentId&&previous.index===s.index)continue;
+  const n=await figma.getNodeByIdAsync(s.id);
   if(s.parentId)await attempt('parent:'+s.id,async()=>{const parent=await figma.getNodeByIdAsync(s.parentId);if(n.parent?.id!==s.parentId||parent.children.indexOf(n)!==s.index)parent.insertChild(Math.min(s.index,parent.children.length),n);});
  }
  for(const s of [...now.nodes].reverse())if(!ids.has(s.id))await attempt('remove:'+s.id,async()=>{const n=await figma.getNodeByIdAsync(s.id);if(n&&!n.removed)n.remove();});
- for(const s of before.nodes)await attempt('restore:'+s.id,async()=>{
+ // Reparenting and removals can change auto-layout. Compare after restoring topology.
+ const aligned=topologyChanged?new Map((await captureState(command,false)).nodes.map(n=>[n.id,n])):current;
+ const changedNodes=before.nodes.filter(s=>{const a=aligned.get(s.id);return a&&(canonical(a.props)!==canonical(s.props)||canonical(a.segments)!==canonical(s.segments)||a.logicalKey!==s.logicalKey);});
+ progress('restoring',{changedNodes:changedNodes.length,totalNodes:before.nodes.length});
+ let restoredNodes=0;
+ for(const s of changedNodes)await attempt('restore:'+s.id,async()=>{
   const n=await figma.getNodeByIdAsync(s.id),p=s.props;
-  if(n.type==='TEXT'){
-   const fonts=s.segments?.map(x=>x.fontName)||[];if(p.fontName)fonts.push(p.fontName);
-   for(const f of new Map(fonts.map(f=>[JSON.stringify(f),f])).values())await figma.loadFontAsync(f);
-  }
   const changed={};
   for(const key of new Set([...snapshotFields,'gridPosition'])){if(['boundVariables','explicitVariableModes','reactions'].includes(key)||p[key]===undefined)continue;let value=n[key];if(key==='gridPosition')value={row:n.gridRowAnchorIndex,column:n.gridColumnAnchorIndex};if(canonical(value)!==canonical(p[key]))changed[key]=p[key];}
-  await applyNodeProps(n,changed,true);
+  const restoreSegments=n.type==='TEXT'&&s.segments&&canonical(n.getStyledTextSegments(segmentFields))!==canonical(s.segments);
+  if(n.type==='TEXT'&&(needsNodeFonts(changed)||restoreSegments)){
+   const fonts=[...n.getRangeAllFontNames(0,n.characters.length),...(s.segments||[]).map(x=>x.fontName)];if(p.fontName)fonts.push(p.fontName);
+   await loadFonts(fonts);
+  }
+  await applyNodeProps(n,changed,true,true);
   if(p.reactions&&canonical(n.reactions)!==canonical(p.reactions))await n.setReactionsAsync(p.reactions);
-  if(p.explicitVariableModes){for(const key of new Set([...Object.keys(n.explicitVariableModes||{}),...Object.keys(p.explicitVariableModes)])){const col=await figma.variables.getVariableCollectionByIdAsync(key);if(!col)continue;if(p.explicitVariableModes[key])n.setExplicitVariableModeForCollection(col,p.explicitVariableModes[key]);else n.clearExplicitVariableModeForCollection(col);}}
-  if(p.boundVariables){const keys=new Set([...Object.keys(n.boundVariables||{}),...Object.keys(p.boundVariables)]);for(const key of keys){if(['fills','strokes','effects','layoutGrids','componentProperties'].includes(key))continue;const alias=p.boundVariables[key];n.setBoundVariable(key,alias?await figma.variables.getVariableByIdAsync(alias.id):null);}}
-  if(n.type==='TEXT'&&s.segments&&canonical(n.getStyledTextSegments(segmentFields))!==canonical(s.segments))for(const seg of s.segments)for(const key of segmentFields){if(seg[key]===undefined||seg.end<=seg.start)continue;const suffix=key[0].toUpperCase()+key.slice(1),method=n['setRange'+suffix+'Async']||n['setRange'+suffix];if(method)await method.call(n,seg.start,seg.end,cloneValue(seg[key]));}
+  if(p.explicitVariableModes){for(const key of new Set([...Object.keys(n.explicitVariableModes||{}),...Object.keys(p.explicitVariableModes)])){if(n.explicitVariableModes?.[key]===p.explicitVariableModes[key])continue;const col=await figma.variables.getVariableCollectionByIdAsync(key);if(!col)continue;if(p.explicitVariableModes[key])n.setExplicitVariableModeForCollection(col,p.explicitVariableModes[key]);else n.clearExplicitVariableModeForCollection(col);}}
+  if(p.boundVariables){const keys=new Set([...Object.keys(n.boundVariables||{}),...Object.keys(p.boundVariables)]);for(const key of keys){if(['fills','strokes','effects','layoutGrids','componentProperties'].includes(key)||canonical(n.boundVariables?.[key])===canonical(p.boundVariables[key]))continue;const alias=p.boundVariables[key];n.setBoundVariable(key,alias?await figma.variables.getVariableByIdAsync(alias.id):null);}}
+  if(restoreSegments)for(const seg of s.segments)for(const key of segmentFields){if(seg[key]===undefined||seg.end<=seg.start)continue;const suffix=key[0].toUpperCase()+key.slice(1),method=n['setRange'+suffix+'Async']||n['setRange'+suffix];if(method)await method.call(n,seg.start,seg.end,cloneValue(seg[key]));}
   if(p.width!==undefined&&p.height!==undefined&&(n.width!==p.width||n.height!==p.height))n.resize(p.width,p.height);
   if(p.relativeTransform&&canonical(n.relativeTransform)!==canonical(p.relativeTransform))n.relativeTransform=p.relativeTransform;
-  if(n.setPluginData)n.setPluginData('bridge.logicalKey',s.logicalKey);
+  if(n.setPluginData&&n.getPluginData('bridge.logicalKey')!==s.logicalKey)n.setPluginData('bridge.logicalKey',s.logicalKey);
+  restoredNodes++;if(restoredNodes%20===0)progress('restoring',{restoredNodes,changedNodes:changedNodes.length,totalNodes:before.nodes.length});
  });
  if(before.collections){
   for(const [field,getter] of [['variables',()=>figma.variables.getLocalVariablesAsync()],['textStyles',()=>figma.getLocalTextStylesAsync()],['effectStyles',()=>figma.getLocalEffectStylesAsync()],...(before.paintStyles?[['paintStyles',()=>figma.getLocalPaintStylesAsync()]]:[]),...(before.gridStyles?[['gridStyles',()=>figma.getLocalGridStylesAsync()]]:[]),['collections',()=>figma.variables.getLocalVariableCollectionsAsync()]]){
-   const old=new Map(before[field].map(v=>[v.id,v]));
+   const old=new Map(before[field].map(v=>[v.id,v])),present=new Map((now[field]||[]).map(v=>[v.id,v]));
    for(const v of await getter())await attempt(field+':'+v.id,async()=>{
     const value=old.get(v.id);if(!value){v.remove();return;}
+    if(canonical(value)===canonical(present.get(v.id)))return;
     if(field==='collections'){v.name=value.name;for(const mode of [...v.modes])if(!value.modes.some(m=>m.modeId===mode.modeId))v.removeMode(mode.modeId);for(const mode of value.modes)v.renameMode(mode.modeId,mode.name);return;}
     if(field==='variables'){v.name=value.name;if(value.description!==undefined)v.description=value.description;v.scopes=value.scopes;for(const platform of ['WEB','ANDROID','iOS']){if(value.codeSyntax?.[platform])v.setVariableCodeSyntax(platform,value.codeSyntax[platform]);else if(v.codeSyntax?.[platform])v.removeVariableCodeSyntax(platform);}for(const [id,val] of Object.entries(value.valuesByMode))v.setValueForMode(id,val);return;}
-    if(value.fontName)await figma.loadFontAsync(value.fontName);for(const [key,val] of Object.entries(value))if(key!=='id')v[key]=cloneValue(val);
+    if(value.fontName)await loadFonts([value.fontName]);for(const [key,val] of Object.entries(value))if(key!=='id'&&canonical(v[key])!==canonical(val))v[key]=cloneValue(val);
    });
   }
  }
@@ -111,7 +124,7 @@ async function planCommand(c){
     if(nonUndoable(step))throw Error('Atomic batch cannot include non-undoable step');
     const symbolic=JSON.stringify(step).includes('"$ref"'),plan=symbolic?{fields:Object.keys(step.props||step),references:'resolved when preceding steps complete'}:await planCommand({...step,target:c.target});
     steps.push({step:stepId,type:step.type,plan,rollback:'supported'});
-   }catch(error){throw Object.assign(Error('Preflight step '+stepId+': '+error.message),{details:{failedStep:stepId,phase:'preflight',rollback:{ok:true,notNeeded:true}}});}
+   }catch(error){throw Object.assign(Error('Preflight step '+stepId+': '+commandError(error,step).message),{details:{failedStep:stepId,phase:'preflight',rollback:{ok:true,notNeeded:true}}});}
   }
   return {steps,rollback:'supported'};
  }
@@ -141,16 +154,17 @@ async function executeReliable(command,progress,requestId){
   await commandPage(command);assertWritable();const op=operationHistory.get(command.operationId);if(!op||op.undone)throw Error('Undo snapshot unavailable or already used; history lasts only for this plugin session');
   if(!command.target||command.target.scope!=='file'&&(op.target.scope==='file'||command.target.pageId!==op.target.pageId))throw Error('Undo target is outside the bound scope');
   const originalCommand={...command,target:op.target};
-  if(canonical(await captureState(originalCommand,false))!==canonical(op.after))throw Error('Undo conflict: design changed after this operation; inspect the diff instead of overwriting later edits');
+  const currentState=await captureState(originalCommand,false);
+  if(canonical(currentState)!==canonical(op.after))throw Error('Undo conflict: design changed after this operation; inspect the diff instead of overwriting later edits');
   if(command.dryRun)return {dryRun:true,operationId:op.operationId,diff:stateDiff(op.after,op.before)};
-  progress('undoing');const restored=await restoreState(op.before,originalCommand);if(!restored.ok)throw Object.assign(Error('Undo incomplete'),{details:restored});op.undone=true;
+  progress('undoing');const restored=await restoreState(op.before,originalCommand,progress,currentState);if(!restored.ok)throw Object.assign(Error('Undo incomplete'),{details:restored});op.undone=true;
   return {operationId:op.operationId,undone:true,diff:stateDiff(op.after,op.before)};
  }
  if(readCommands.has(command.type)||command.type==='design-system'&&command.action==='inspect')return executeLegacy(command,progress);
  const plan=await planCommand(command);
  if(command.dryRun)return {dryRun:true,plan,writes:0};
  const unsupported=nonUndoable(command);if(unsupported&&!command.allowNonUndoable)throw Error('Cannot reliably undo: '+unsupported+'. Inspect dry-run, then set allowNonUndoable:true explicitly if intended.');
- if(unsupported){figma.commitUndo?.();try{return {...await executeWrite(command,progress),operationId:requestId,undo:{supported:false,reason:unsupported,nativeUndo:true}};}catch(error){throw Object.assign(Error(error.message),{details:{operationId:requestId,rollback:{ok:false,unsupported:true},nativeUndo:true}});}finally{figma.commitUndo?.();}}
+ if(unsupported){figma.commitUndo?.();try{return {...await executeWrite(command,progress),operationId:requestId,undo:{supported:false,reason:unsupported,nativeUndo:true}};}catch(error){throw Object.assign(commandError(error,command),{details:{operationId:requestId,rollback:{ok:false,unsupported:true},nativeUndo:true}});}finally{figma.commitUndo?.();}}
  const before=await captureState(command),steps=Object.create(null),completedSteps=[];let currentStep=null;
  try{
   progress('snapshot-saved',{nodes:before.nodes.length});let result;
@@ -161,6 +175,6 @@ async function executeReliable(command,progress,requestId){
   const operationId=requestId;operationHistory.set(operationId,{operationId,target:command.target,type:command.type,createdAt:new Date().toISOString(),before,after,undone:false});
   let retained=0,count=0;for(const [id,op] of [...operationHistory].reverse()){count++;retained+=canonical(op.before).length+canonical(op.after).length;if(retained>SNAPSHOT_LIMIT*2||count>20)operationHistory.delete(id);}
   figma.commitUndo?.();return {...result,operationId,diff,undo:{supported:true,sessionOnly:true},plan};
- }catch(error){progress('rolling-back');let rollback;try{rollback=await restoreState(before,command);}catch(restoreError){rollback={ok:false,errors:[{step:'restore',error:restoreError.message}]};}throw Object.assign(Error(error.message),{details:{failedStep:currentStep,completedSteps:completedSteps.map(s=>({step:s.step,type:s.type})),rollback}});}
+ }catch(error){progress('rolling-back');let rollback;try{rollback=await restoreState(before,command,progress);}catch(restoreError){rollback={ok:false,errors:[{step:'restore',error:errorMessage(restoreError)}]};}const failedCommand=currentStep===null?command:command.commands.find((s,i)=>(s.stepId||String(i))===currentStep);throw Object.assign(commandError(error,failedCommand),{details:{failedStep:currentStep,completedSteps:completedSteps.map(s=>({step:s.step,type:s.type})),rollback}});}
 }
 async function executeWrite(c,progress){if(apiWrites.has(c.type))return executeApiCommand(c,progress);if(c.type==='repair-layout')return executeVisualRepair(c);return isHighLevel(c.type)?executeHighLevel(c,progress):executeLegacy(c,progress);}

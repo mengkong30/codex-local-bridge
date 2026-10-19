@@ -5,6 +5,16 @@ const nodePropertySet = new Set(API_CONTRACT.nodeProperties);
 const styleSetters = {fillStyleId:'setFillStyleIdAsync',strokeStyleId:'setStrokeStyleIdAsync',textStyleId:'setTextStyleIdAsync',effectStyleId:'setEffectStyleIdAsync',gridStyleId:'setGridStyleIdAsync'};
 const styleTypes = {PAINT:['createPaintStyle','getLocalPaintStylesAsync','paints'],GRID:['createGridStyle','getLocalGridStylesAsync','layoutGrids'],TEXT:['createTextStyle','getLocalTextStylesAsync'],EFFECT:['createEffectStyle','getLocalEffectStylesAsync','effects']};
 const actionTypes = API_CONTRACT.actions;
+function errorMessage(error) {
+ if(typeof error==='string'&&error.trim())return error.trim();
+ for(const key of ['message','error','reason'])if(typeof error?.[key]==='string'&&error[key].trim())return error[key].trim();
+ try{const value=JSON.stringify(error);if(value&& !['{}','null','""'].includes(value))return value;}catch{}
+ return 'Figma API rejected the operation without an error message';
+}
+function commandError(error,c) {
+ const prefix=(c?.type||'Figma operation')+(c?.nodeId?' on node '+c.nodeId:'')+': ',message=errorMessage(error);
+ return Error(message.startsWith(prefix)?message:prefix+message);
+}
 function requireApi(object, method) {
  if (!object || typeof object[method] !== 'function') throw Error('This Figma runtime does not provide '+method);
  return object[method].bind(object);
@@ -56,9 +66,11 @@ async function loadNodeFonts(n,props={}) {
  const fonts=props.fontName?[props.fontName]:n.getRangeAllFontNames(0,n.characters.length);
  for(const font of new Map(fonts.map(f=>[JSON.stringify(f),f])).values())await figma.loadFontAsync(font);
 }
+const fontRequiredProps=new Set(['width','height','fontName','fontSize','characters','textAlignHorizontal','textAlignVertical','textAutoResize','textTruncation','maxLines','lineHeight','letterSpacing','textCase','textDecoration','paragraphIndent','paragraphSpacing','listSpacing','hangingPunctuation','hangingList','hyperlink','leadingTrim','textStyleId']);
+const needsNodeFonts=props=>Object.keys(props).some(key=>fontRequiredProps.has(key));
 async function applyNodeProps(n,props, restoring=false, fontsLoaded=false) {
  if(!restoring)validateProps(n,props);
- if(!fontsLoaded)await loadNodeFonts(n,props);
+ if(!fontsLoaded&&needsNodeFonts(props))await loadNodeFonts(n,props);
  // Establish layout and grid track counts before track/child sizing.
  const order=['layoutMode','gridItemsPositioning','gridAutoTracks','gridRowCount','gridColumnCount','fontName','characters'];
  const deferred=new Set(['width','height','gridRowSizes','gridColumnSizes','gridPosition','vectorNetwork',...Object.keys(styleSetters)]);
@@ -127,6 +139,36 @@ async function apiNodes(ids) {
  if(!Array.isArray(ids)||!ids.length||ids.length>1000||new Set(ids).size!==ids.length)throw Error('nodeIds requires 1–1000 distinct IDs');
  return Promise.all(ids.map(apiNode));
 }
+async function validateReactions(n,reactions) {
+ if(!Array.isArray(reactions))throw Error('reactions must be an array');
+ requireApi(n,'setReactionsAsync');
+ async function actions(items,path,depth=0) {
+  if(depth>20)throw Error(path+' exceeds the conditional nesting limit');
+  if(!Array.isArray(items)||!items.length)throw Error(path+' requires a nonempty action list');
+  for(const [i,a] of items.entries()) {
+   const at=path+'['+i+']';requireObject(a,at);requireString(a.type,at+'.type');
+   if(a.type==='CONDITIONAL') {
+    if(!Array.isArray(a.conditionalBlocks)||!a.conditionalBlocks.length)throw Error(at+'.conditionalBlocks must be nonempty');
+    for(const [j,block] of a.conditionalBlocks.entries())await actions(block?.actions,at+'.conditionalBlocks['+j+'].actions',depth+1);
+   }
+   if(a.type==='NODE') {
+    if(!['NAVIGATE','SWAP','OVERLAY','SCROLL_TO','CHANGE_TO'].includes(a.navigation))throw Error(at+'.navigation is invalid');
+    if(a.destinationId===null)continue; // Figma preserves null for invalidated destinations.
+    requireString(a.destinationId,at+'.destinationId');
+    const destination=await figma.getNodeByIdAsync(a.destinationId);
+    if(!destination)throw Error(at+'.destinationId: node '+a.destinationId+' does not exist');
+    if(['NAVIGATE','SWAP','OVERLAY'].includes(a.navigation)) {
+     let ancestor=destination.parent;while(ancestor?.type==='SECTION')ancestor=ancestor.parent;
+     if(!['FRAME','COMPONENT','INSTANCE'].includes(destination.type)||ancestor?.type!=='PAGE')throw Error(at+'.destinationId: '+a.destinationId+' must be a top-level frame, component or instance for '+a.navigation+' (frames inside Sections are allowed)');
+    }
+   }
+  }
+ }
+ for(const [i,r] of reactions.entries()) {
+  const at='reactions['+i+']';requireObject(r,at);requireObject(r.trigger,at+'.trigger');requireString(r.trigger.type,at+'.trigger.type');
+  await actions(r.actions??(r.action?[r.action]:undefined),at+'.actions');
+ }
+}
 async function planApiCommand(c) {
  assertWritable();
  if(actionTypes[c.type]&&!actionTypes[c.type].includes(c.action))throw Error('Unsupported '+c.type+' action: '+c.action);
@@ -145,7 +187,7 @@ async function planApiCommand(c) {
    if(c.action==='set-properties')requireObject(c.properties,'properties');
    if(c.action==='swap'&&!c.componentId&&!c.componentKey)throw Error('swap requires componentId or componentKey');
   }
-  if(c.type==='set-reactions'){if(!Array.isArray(c.reactions))throw Error('reactions must be an array');requireApi(n,'setReactionsAsync');}
+  if(c.type==='set-reactions')await validateReactions(n,c.reactions);
   if(c.type==='set-variable-mode'){requireString(c.collectionId,'collectionId');if(!c.clear)requireString(c.modeId,'modeId');}
  }
  if(['group-nodes','boolean-operation','flatten-nodes'].includes(c.type)) {

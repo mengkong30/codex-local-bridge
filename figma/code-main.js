@@ -16,6 +16,7 @@ function documentInfo(page = figma.currentPage) {
     editorType: figma.editorType,
     fileName: figma.root.name,
     bridgeVersion: 11,
+    bridgePackageVersion: '0.8.1',
     connectionSettings:bridgeSettings,
     panelProtocol: 1,
     pages: figma.root.children.map(p => ({id:p.id, name:p.name})),
@@ -95,7 +96,7 @@ figma.ui.onmessage = async (message) => {
       type: "bridge-result",
       requestId,
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: commandError(error,command).message,
       details:error.details || null
     });
   } finally {

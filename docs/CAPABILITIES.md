@@ -1,10 +1,10 @@
 # 能力范围
 
-[返回首页](../README.md) · 插件包 / 服务 0.8.0 · Figma runtime v11
+[返回首页](../README.md) · 插件包 / 服务 0.8.1 · Figma runtime v11
 
 先调用 local_figma_capabilities。返回可用命令、统一属性白名单、文字范围字段、操作类型与编辑器信息。17 个 MCP 工具通过结构化命令执行；没有任意 JavaScript 执行接口。
 
-| 领域 | 0.8.0 新接入 | 仍需了解的边界 |
+| 领域 | 0.8.1 新接入 | 仍需了解的边界 |
 | --- | --- | --- |
 | 图层管理 | 创建、真实删除、复制、跨父级移动、排序、分组与解组 | 页面/文档/slide grid 根节点不进入通用删除；移除原 ID 的操作不能用桥接快照恢复 |
 | 图形与矢量 | Line、Polygon、Star、Section、Slice、Vector、vectorPaths/vectorNetwork；四种布尔运算与 flatten | 节点类型和字段以当前 Figma 支持为准，布尔运算/flatten 会替换或移除原节点 |

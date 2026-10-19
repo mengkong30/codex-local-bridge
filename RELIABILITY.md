@@ -37,6 +37,12 @@ Supported: node build/update, high-level templates, auto-layout, pages, variable
 
 Non-undoable: image-store insertion, component property definitions, and variant-combining metadata. Dry-run discloses the limitation; explicit `allowNonUndoable:true` is required for standalone execution. Atomic batches reject them. Arbitrary user deletion, remote-library changes, new Figma files, and cross-file transactions are outside this API.
 
+## 0.8.1 恢复性能与迟到结果
+
+撤销仍比较完整页面/文件快照以拒绝覆盖后续修改。恢复时只对变化的拓扑、节点属性和资源执行 API 写入，无关文字不加载字体；需要的字体在一次恢复内去重。文字纯位置或旋转修改也无需加载字体。`restoring` 进度包含变化/总节点数量。
+
+请求超时不代表执行失败。若心跳同时过期，worker 使用原连接 ID 与 `activeRequestId` 恢复该未完成请求；匹配的迟到进度/结果可重新激活原连接。结果固定回传至任务最初的服务/连接，确认后恢复面板。未知请求、请求不匹配及服务实例改变时继续拒绝自动切换，不重放写入。
+
 ## 0.8.0 扩展恢复边界
 
 统一字段定义覆盖原型 reactions、显式变量模式及四类样式的快照。最新 20 条撤销记录按时间从新到旧保留。真实删除/解组/布尔/flatten、实例内部操作、资源删除/导入和编辑器专用元数据不承诺桥接恢复；它们需要 allowNonUndoable:true，返回 undo.supported:false，并被原子 batch 拒绝。type/action 必须为字面字符串，解析引用后仍复核不可撤销限制。详见 docs/EXPANDED-API.md。

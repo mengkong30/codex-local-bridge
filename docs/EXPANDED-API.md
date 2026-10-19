@@ -2,7 +2,7 @@
 
 [首页](../README.md) · [能力范围](CAPABILITIES.md) · [可靠写入](../RELIABILITY.md)
 
-服务 / 包 0.8.0，runtime v11。先调用 local_figma_capabilities，再将下列对象放进 local_figma_command 的 command 字段，外层传 bindingId。connectionId、pageId、clientId、target 不放在 command 内。每个实际写入使用唯一 idempotencyKey；dry-run 使用另一个 key。
+服务 / 包 0.8.1，runtime v11。先调用 local_figma_capabilities，再将下列对象放进 local_figma_command 的 command 字段，外层传 bindingId。connectionId、pageId、clientId、target 不放在 command 内。每个实际写入使用唯一 idempotencyKey；dry-run 使用另一个 key。
 
 ## 命令一览
 
@@ -74,6 +74,8 @@ get-library 查询已启用库的变量集合；库启用与发布仍由 Figma U
 ## 原型与导出
 
 set-reactions 直接传递 Figma 的 Reaction/Trigger/Action 结构，支持官方动作组合。示例：
+
+写入前校验 Trigger、非空 actions 及条件动作中的节点目标。NAVIGATE/SWAP/OVERLAY 的目标需为顶层 FRAME/COMPONENT/INSTANCE，允许处于 Section 中；SCROLL_TO 和 CHANGE_TO 保留各自的目标语义，其他原生限制由 Figma API 校验。错误包含命令、源节点及 reactions/actions 参数位置。[官方 Action 语义](https://developers.figma.com/docs/plugins/api/Action/)。
 
 ```json
 {"type":"set-reactions","nodeId":"button-id","reactions":[{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"NODE","destinationId":"frame-id","navigation":"NAVIGATE","transition":null,"preserveScrollPosition":false}]}]}

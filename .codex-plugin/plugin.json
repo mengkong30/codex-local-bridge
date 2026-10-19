@@ -1,6 +1,6 @@
 {
   "name": "codex-local-bridge",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "本地 Figma 多 AI 页面控制、目标隔离、执行进度与可编辑设计，无需云端密钥。",
   "author": {
     "name": "mengkong30"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Codex Local Bridge",
     "shortDescription": "统一查看多文件与 AI，精简状态条保持连接",
-    "longDescription": "本地连接 AI 与 Figma，创建和修改可编辑图层，支持多 AI 页面分工、统一主控与视觉复检。0.8.0 扩展图层、矢量、布局、富文本、组件、变量模式、原型、导出及多编辑器接口。包/服务 0.8.0，runtime v11；具体能力由运行环境决定。",
+    "longDescription": "本地连接 AI 与 Figma，创建和修改可编辑图层，支持多 AI 页面分工、统一主控与视觉复检。0.8.1 扩展图层、矢量、布局、富文本、组件、变量模式、原型、导出及多编辑器接口。包/服务 0.8.1，runtime v11；具体能力由运行环境决定。",
     "developerName": "mengkong30",
     "category": "Productivity",
     "capabilities": [],
