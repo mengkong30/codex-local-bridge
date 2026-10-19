@@ -1,13 +1,14 @@
 // In-memory transaction journal. Reopening the plugin intentionally clears undo history.
 const operationHistory = new Map();
 const SNAPSHOT_LIMIT = 24 * 1024 * 1024;
-const snapshotFields = ['name','visible','locked','x','y','width','height','relativeTransform','fills','strokes','strokeWeight','strokeAlign','opacity','effects','cornerRadius','topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius','clipsContent','fontName','fontSize','characters','textAlignHorizontal','textAlignVertical','textAutoResize','lineHeight','letterSpacing','layoutMode','layoutSizingHorizontal','layoutSizingVertical','layoutGrow','layoutAlign','layoutPositioning','paddingLeft','paddingRight','paddingTop','paddingBottom','itemSpacing','primaryAxisAlignItems','counterAxisAlignItems','primaryAxisSizingMode','counterAxisSizingMode','description','textStyleId','effectStyleId','boundVariables','vectorPaths','textTruncation','maxLines','minWidth','minHeight','maxWidth','maxHeight','constraints'];
+const snapshotFields = [...API_CONTRACT.nodeProperties.filter(k=>k!=='gridPosition'),'reactions','explicitVariableModes','name','visible','locked','x','y','width','height','relativeTransform','fills','strokes','strokeWeight','strokeAlign','opacity','effects','cornerRadius','topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius','clipsContent','fontName','fontSize','characters','textAlignHorizontal','textAlignVertical','textAutoResize','lineHeight','letterSpacing','layoutMode','layoutSizingHorizontal','layoutSizingVertical','layoutGrow','layoutAlign','layoutPositioning','paddingLeft','paddingRight','paddingTop','paddingBottom','itemSpacing','primaryAxisAlignItems','counterAxisAlignItems','primaryAxisSizingMode','counterAxisSizingMode','description','textStyleId','effectStyleId','boundVariables','vectorPaths','textTruncation','maxLines','minWidth','minHeight','maxWidth','maxHeight','constraints'];
 const segmentFields=['fontName','fontSize','fills','lineHeight','letterSpacing','textDecoration','textCase','textStyleId','fillStyleId','hyperlink','listOptions','listSpacing','indentation','paragraphIndent','paragraphSpacing'];
 const cloneValue = v => v === undefined || typeof v === 'symbol' ? undefined : JSON.parse(JSON.stringify(v));
 const canonical = v => JSON.stringify(v,(_,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x);
 function nodePath(n){const parts=[];for(let p=n;p&&p.type!=='DOCUMENT';p=p.parent)parts.unshift(p.name);return parts.join(' / ');}
 function nodeSnapshot(n){
- const props={};for(const key of snapshotFields){try{const value=cloneValue(n[key]);if(value!==undefined)props[key]=value;}catch(e){throw Error('Cannot snapshot '+key+' on '+n.id+': '+e.message);}}
+ const props={};for(const key of new Set(snapshotFields)){if(!(key in n))continue;if(['gridAutoTracks','gridItemsPositioning','gridRowCount','gridColumnCount','gridRowGap','gridColumnGap','gridRowSizes','gridColumnSizes'].includes(key)&&n.layoutMode!=='GRID')continue;if(['gridRowSpan','gridColumnSpan','gridChildHorizontalAlign','gridChildVerticalAlign'].includes(key)&&n.parent?.layoutMode!=='GRID')continue;try{const value=cloneValue(n[key]);if(value!==undefined)props[key]=value;}catch(e){throw Error('Cannot snapshot '+key+' on '+n.id+': '+e.message);}}
+ if(n.parent?.layoutMode==='GRID'&&n.gridRowAnchorIndex!==undefined)props.gridPosition={row:n.gridRowAnchorIndex,column:n.gridColumnAnchorIndex};
  return {id:n.id,type:n.type,parentId:n.parent?.id,index:n.parent?.children?.indexOf(n),path:nodePath(n),props,logicalKey:n.getPluginData?.('bridge.logicalKey')||'',segments:n.type==='TEXT'?cloneValue(n.getStyledTextSegments(segmentFields)):undefined};
 }
 async function captureState(command,enforceLimit=true){
@@ -16,12 +17,13 @@ async function captureState(command,enforceLimit=true){
  const pages=file?figma.root.children:[page],nodes=[];
  function visit(n){nodes.push(nodeSnapshot(n));for(const child of n.children||[])visit(child);}pages.forEach(visit);
  const state={nodes};
- if(file){
+ if(file&&figma.editorType==='figma'){
   state.collections=(await figma.variables.getLocalVariableCollectionsAsync()).map(v=>({id:v.id,name:v.name,modes:cloneValue(v.modes)}));
-  state.variables=(await figma.variables.getLocalVariablesAsync()).map(v=>({id:v.id,name:v.name,scopes:cloneValue(v.scopes),codeSyntax:cloneValue(v.codeSyntax),valuesByMode:cloneValue(v.valuesByMode)}));
-  state.textStyles=(await figma.getLocalTextStylesAsync()).map(v=>({id:v.id,name:v.name,fontName:cloneValue(v.fontName),fontSize:v.fontSize,lineHeight:cloneValue(v.lineHeight),letterSpacing:cloneValue(v.letterSpacing)}));
-  state.effectStyles=(await figma.getLocalEffectStylesAsync()).map(v=>({id:v.id,name:v.name,effects:cloneValue(v.effects)}));
+  state.variables=(await figma.variables.getLocalVariablesAsync()).map(v=>({id:v.id,name:v.name,description:v.description,scopes:cloneValue(v.scopes),codeSyntax:cloneValue(v.codeSyntax),valuesByMode:cloneValue(v.valuesByMode)}));
+  state.textStyles=(await figma.getLocalTextStylesAsync()).map(snapshotStyle);
+  state.effectStyles=(await figma.getLocalEffectStylesAsync()).map(snapshotStyle);
  }
+ if(file&&figma.editorType==='figma'){for(const [field,method,properties] of [['paintStyles','getLocalPaintStylesAsync',['name','description','paints']],['gridStyles','getLocalGridStylesAsync',['name','description','layoutGrids']]]){if(typeof figma[method]!=='function')continue;state[field]=(await figma[method]()).map(v=>({id:v.id,...Object.fromEntries(properties.filter(k=>v[k]!==undefined).map(k=>[k,cloneValue(v[k])]))}));}}
  if(enforceLimit&&canonical(state).length>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 24 MiB; split the operation before writing');
  return state;
 }
@@ -39,10 +41,11 @@ async function restoreState(before,command){
    const fonts=s.segments?.map(x=>x.fontName)||[];if(p.fontName)fonts.push(p.fontName);
    for(const f of new Map(fonts.map(f=>[JSON.stringify(f),f])).values())await figma.loadFontAsync(f);
   }
-  // Restore only changed properties: untouched instance/layout properties may be read-only.
-  for(const key of snapshotFields){if(['width','height','relativeTransform','boundVariables','textStyleId','effectStyleId'].includes(key)||p[key]===undefined)continue;
-   if(canonical(n[key])!==canonical(p[key]))n[key]=cloneValue(p[key]);}
-  for(const [key,method] of [['textStyleId','setTextStyleIdAsync'],['effectStyleId','setEffectStyleIdAsync']])if(p[key]!==undefined&&n[key]!==p[key])await n[method](p[key]);
+  const changed={};
+  for(const key of new Set([...snapshotFields,'gridPosition'])){if(['boundVariables','explicitVariableModes','reactions'].includes(key)||p[key]===undefined)continue;let value=n[key];if(key==='gridPosition')value={row:n.gridRowAnchorIndex,column:n.gridColumnAnchorIndex};if(canonical(value)!==canonical(p[key]))changed[key]=p[key];}
+  await applyNodeProps(n,changed,true);
+  if(p.reactions&&canonical(n.reactions)!==canonical(p.reactions))await n.setReactionsAsync(p.reactions);
+  if(p.explicitVariableModes){for(const key of new Set([...Object.keys(n.explicitVariableModes||{}),...Object.keys(p.explicitVariableModes)])){const col=await figma.variables.getVariableCollectionByIdAsync(key);if(!col)continue;if(p.explicitVariableModes[key])n.setExplicitVariableModeForCollection(col,p.explicitVariableModes[key]);else n.clearExplicitVariableModeForCollection(col);}}
   if(p.boundVariables){const keys=new Set([...Object.keys(n.boundVariables||{}),...Object.keys(p.boundVariables)]);for(const key of keys){if(['fills','strokes','effects','layoutGrids','componentProperties'].includes(key))continue;const alias=p.boundVariables[key];n.setBoundVariable(key,alias?await figma.variables.getVariableByIdAsync(alias.id):null);}}
   if(n.type==='TEXT'&&s.segments&&canonical(n.getStyledTextSegments(segmentFields))!==canonical(s.segments))for(const seg of s.segments)for(const key of segmentFields){if(seg[key]===undefined||seg.end<=seg.start)continue;const suffix=key[0].toUpperCase()+key.slice(1),method=n['setRange'+suffix+'Async']||n['setRange'+suffix];if(method)await method.call(n,seg.start,seg.end,cloneValue(seg[key]));}
   if(p.width!==undefined&&p.height!==undefined&&(n.width!==p.width||n.height!==p.height))n.resize(p.width,p.height);
@@ -50,12 +53,12 @@ async function restoreState(before,command){
   if(n.setPluginData)n.setPluginData('bridge.logicalKey',s.logicalKey);
  });
  if(before.collections){
-  for(const [field,getter] of [['variables',()=>figma.variables.getLocalVariablesAsync()],['textStyles',()=>figma.getLocalTextStylesAsync()],['effectStyles',()=>figma.getLocalEffectStylesAsync()],['collections',()=>figma.variables.getLocalVariableCollectionsAsync()]]){
+  for(const [field,getter] of [['variables',()=>figma.variables.getLocalVariablesAsync()],['textStyles',()=>figma.getLocalTextStylesAsync()],['effectStyles',()=>figma.getLocalEffectStylesAsync()],...(before.paintStyles?[['paintStyles',()=>figma.getLocalPaintStylesAsync()]]:[]),...(before.gridStyles?[['gridStyles',()=>figma.getLocalGridStylesAsync()]]:[]),['collections',()=>figma.variables.getLocalVariableCollectionsAsync()]]){
    const old=new Map(before[field].map(v=>[v.id,v]));
    for(const v of await getter())await attempt(field+':'+v.id,async()=>{
     const value=old.get(v.id);if(!value){v.remove();return;}
-    if(field==='collections'){v.name=value.name;for(const mode of value.modes)v.renameMode(mode.modeId,mode.name);return;}
-    if(field==='variables'){v.name=value.name;v.scopes=value.scopes;for(const platform of ['WEB','ANDROID','iOS']){if(value.codeSyntax?.[platform])v.setVariableCodeSyntax(platform,value.codeSyntax[platform]);else if(v.codeSyntax?.[platform])v.removeVariableCodeSyntax(platform);}for(const [id,val] of Object.entries(value.valuesByMode))v.setValueForMode(id,val);return;}
+    if(field==='collections'){v.name=value.name;for(const mode of [...v.modes])if(!value.modes.some(m=>m.modeId===mode.modeId))v.removeMode(mode.modeId);for(const mode of value.modes)v.renameMode(mode.modeId,mode.name);return;}
+    if(field==='variables'){v.name=value.name;if(value.description!==undefined)v.description=value.description;v.scopes=value.scopes;for(const platform of ['WEB','ANDROID','iOS']){if(value.codeSyntax?.[platform])v.setVariableCodeSyntax(platform,value.codeSyntax[platform]);else if(v.codeSyntax?.[platform])v.removeVariableCodeSyntax(platform);}for(const [id,val] of Object.entries(value.valuesByMode))v.setValueForMode(id,val);return;}
     if(value.fontName)await figma.loadFontAsync(value.fontName);for(const [key,val] of Object.entries(value))if(key!=='id')v[key]=cloneValue(val);
    });
   }
@@ -65,7 +68,7 @@ async function restoreState(before,command){
 }
 function stateDiff(before,after){
  const changes=[];
- for(const field of ['nodes','collections','variables','textStyles','effectStyles']){
+ for(const field of ['nodes','collections','variables','textStyles','effectStyles','paintStyles','gridStyles']){
   const old=new Map((before[field]||[]).map(n=>[n.id,n])),next=new Map((after[field]||[]).map(n=>[n.id,n]));
   for(const id of new Set([...old.keys(),...next.keys()])){const a=old.get(id),b=next.get(id);if(canonical(a)===canonical(b))continue;
    const properties=[];for(const key of new Set([...Object.keys(a?.props||a||{}),...Object.keys(b?.props||b||{})])){const x=(a?.props||a)?.[key],y=(b?.props||b)?.[key];if(canonical(x)!==canonical(y))properties.push({property:key,before:x??null,after:y??null});}
@@ -77,20 +80,22 @@ function stateDiff(before,after){
  }
  return changes;
 }
-const readCommands=new Set(['ping','bridge-capabilities','get-document-info','get-pages','get-node','get-fonts','export-node','validate-layout','review-layout','operation-history']);
-function nonUndoable(c){return c.type==='import-image'?'Image bytes cannot be removed from the Figma image store':c.type==='design-system'&&['property','variants'].includes(c.action)?'Component property definitions and variant metadata cannot be restored reliably':null;}
+const readCommands=new Set([...API_CONTRACT.reads,'ping','bridge-capabilities','get-document-info','get-pages','get-node','get-fonts','export-node','validate-layout','review-layout','operation-history']);
+function nonUndoable(c){return extendedNonUndoable(c)||(c.type==='import-image'?'Image bytes cannot be removed from the Figma image store':c.type==='design-system'&&['property','variants'].includes(c.action)?'Component property definitions and variant metadata cannot be restored reliably':null);}
 function resolveReferences(value,steps){
  if(Array.isArray(value))return value.map(v=>resolveReferences(v,steps));
  if(value&&typeof value==='object'){if(Object.keys(value).length===1&&value.$ref){const parts=value.$ref.split('.');const first=parts.shift();let result=Object.hasOwn(steps,first)?steps[first]:undefined;for(const p of parts)result=result&&Object.hasOwn(result,p)?result[p]:undefined;if(result===undefined)throw Error('Unresolved step reference: '+value.$ref);return result;}return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,resolveReferences(v,steps)]));}return value;
 }
 async function planCommand(c){
- await commandPage(c);const reason=nonUndoable(c);
+ if(!c.target)throw Error('Writes require an explicit controller binding');await commandPage(c);assertWritable();const reason=nonUndoable(c);
+ if(apiWrites.has(c.type))return planApiCommand(c);
+ if(c.type==='apply-auto-layout')return planAutoLayout(c);
  const writes=['build-section','update-node','import-image','design-system','batch','repair-layout',...highLevelTypes];if(!writes.includes(c.type))throw Error('Unsupported write command: '+c.type);
  if(c.type==='design-system'&&!['inspect','page','collection','variable','text-style','effect-style','bind','variants','property','describe','clone-component','replace-instance'].includes(c.action))throw Error('Unsupported design-system action: '+c.action);
  if(c.type==='repair-layout')return planVisualRepair(c);
  if(c.type==='build-section'){
   if(!Array.isArray(c.nodes))throw Error('nodes array required');const nodes=[];
-  async function walk(spec,path){if(!['FRAME','COMPONENT','RECTANGLE','ELLIPSE','TEXT','SVG','INSTANCE'].includes(spec.kind))throw Error('Unsupported kind: '+spec.kind);if(spec.kind==='TEXT'&&!spec.fontName)throw Error('Text fontName required');if(spec.kind==='INSTANCE'){const component=await figma.getNodeByIdAsync(spec.componentId);if(component?.type!=='COMPONENT')throw Error('Missing component');}nodes.push({path,type:spec.kind,properties:Object.entries(spec).filter(([k])=>!['children','kind'].includes(k)).map(([property,after])=>({property,before:null,after}))});for(const [i,child] of (spec.children||[]).entries())await walk(child,path+'/'+(child.name||i));}
+  async function walk(spec,path){validateSpec(spec);if(spec.kind==='TEXT'&&!spec.fontName)throw Error('Text fontName required');if(spec.kind==='INSTANCE'){const component=await figma.getNodeByIdAsync(spec.componentId);if(component?.type!=='COMPONENT')throw Error('Missing component');}nodes.push({path,type:spec.kind,properties:Object.entries(spec).filter(([k])=>!['children','kind'].includes(k)).map(([property,after])=>({property,before:null,after}))});for(const [i,child] of (spec.children||[]).entries())await walk(child,path+'/'+(child.name||i));}
   for(const [i,spec] of c.nodes.entries())await walk(spec,(spec.name||String(i)));return {parentId:c.parentId||c.target?.pageId,nodes,rollback:'supported'};
  }
  if(c.type==='batch'){
@@ -100,6 +105,7 @@ async function planCommand(c){
    const stepId=step?.stepId||String(i);
    try{
     if(!step||typeof step!=='object'||Array.isArray(step))throw Error('Batch step must be an object');
+    if(typeof step.type!=='string'||step.action!==undefined&&typeof step.action!=='string')throw Error('Batch command type/action must be literal strings, not result references');
     if(seen.has(stepId))throw Error('Duplicate stepId');seen.add(stepId);
     if(step.type==='batch'||step.type==='undo-operation'||readCommands.has(step.type)||step.target)throw Error('Batch steps must be individual writes without routing');
     if(nonUndoable(step))throw Error('Atomic batch cannot include non-undoable step');
@@ -111,10 +117,7 @@ async function planCommand(c){
  }
  if(c.type==='update-node'){
   const n=await figma.getNodeByIdAsync(c.nodeId);if(!n)throw Error('Node not found');if(!c.props||typeof c.props!=='object')throw Error('props object required');validateTextAlignment(n,c.props);
-  if(n.type==='TEXT'&&n.hasMissingFont)throw Error('Text has missing fonts; choose an available font before editing');
-  const allowed=['x','y','name','fills','strokes','opacity','fontSize','characters','textAlignHorizontal','textAlignVertical','lineHeight','letterSpacing','visible','clipsContent','width','height'];
-  for(const key of Object.keys(c.props))if(!allowed.includes(key))throw Error('Unsupported update property: '+key);
-  if((c.props.width===undefined)!==(c.props.height===undefined))throw Error('width and height must be supplied together');
+  validateProps(n,c.props);
   return {nodes:[{id:n.id,path:nodePath(n),properties:Object.entries(c.props).map(([property,after])=>({property,before:cloneValue(n[property]),after}))}],rollback:'supported'};
  }
  if(isHighLevel(c.type)&&!['create-variable-collection','apply-auto-layout'].includes(c.type)){
@@ -135,7 +138,7 @@ async function executeReliable(command,progress,requestId){
  if(command.type==='review-layout')return createVisualReview(command,requestId);
  if(command.type==='validate-layout')return validateLayout(command);
  if(command.type==='undo-operation'){
-  await commandPage(command);const op=operationHistory.get(command.operationId);if(!op||op.undone)throw Error('Undo snapshot unavailable or already used; history lasts only for this plugin session');
+  await commandPage(command);assertWritable();const op=operationHistory.get(command.operationId);if(!op||op.undone)throw Error('Undo snapshot unavailable or already used; history lasts only for this plugin session');
   if(!command.target||command.target.scope!=='file'&&(op.target.scope==='file'||command.target.pageId!==op.target.pageId))throw Error('Undo target is outside the bound scope');
   const originalCommand={...command,target:op.target};
   if(canonical(await captureState(originalCommand,false))!==canonical(op.after))throw Error('Undo conflict: design changed after this operation; inspect the diff instead of overwriting later edits');
@@ -147,17 +150,17 @@ async function executeReliable(command,progress,requestId){
  const plan=await planCommand(command);
  if(command.dryRun)return {dryRun:true,plan,writes:0};
  const unsupported=nonUndoable(command);if(unsupported&&!command.allowNonUndoable)throw Error('Cannot reliably undo: '+unsupported+'. Inspect dry-run, then set allowNonUndoable:true explicitly if intended.');
- if(unsupported)return {...await executeLegacy(command,progress),undo:{supported:false,reason:unsupported}};
+ if(unsupported){figma.commitUndo?.();try{return {...await executeWrite(command,progress),operationId:requestId,undo:{supported:false,reason:unsupported,nativeUndo:true}};}catch(error){throw Object.assign(Error(error.message),{details:{operationId:requestId,rollback:{ok:false,unsupported:true},nativeUndo:true}});}finally{figma.commitUndo?.();}}
  const before=await captureState(command),steps=Object.create(null),completedSteps=[];let currentStep=null;
  try{
   progress('snapshot-saved',{nodes:before.nodes.length});let result;
   if(command.type==='batch'){
-   for(const [i,raw] of command.commands.entries()){currentStep=raw.stepId||String(i);if(Object.hasOwn(steps,currentStep))throw Error('Duplicate stepId');const step={...resolveReferences(raw,steps),target:command.target};await planCommand(step);steps[currentStep]=await executeWrite(step,progress);completedSteps.push({step:currentStep,type:step.type,result:steps[currentStep]});}result={steps:completedSteps};
+   for(const [i,raw] of command.commands.entries()){currentStep=raw.stepId||String(i);if(Object.hasOwn(steps,currentStep))throw Error('Duplicate stepId');const step={...resolveReferences(raw,steps),target:command.target};if(nonUndoable(step))throw Error('Atomic batch cannot include a resolved non-undoable step');await planCommand(step);steps[currentStep]=await executeWrite(step,progress);completedSteps.push({step:currentStep,type:step.type,result:steps[currentStep]});}result={steps:completedSteps};
   }else result=await executeWrite({...command,nextReviewId:requestId+'-review'},progress);
   const after=await captureState(command),diff=stateDiff(before,after);
   const operationId=requestId;operationHistory.set(operationId,{operationId,target:command.target,type:command.type,createdAt:new Date().toISOString(),before,after,undone:false});
-  let retained=0;for(const [id,op] of [...operationHistory].reverse()){retained+=canonical(op.before).length+canonical(op.after).length;if(retained>SNAPSHOT_LIMIT*2||operationHistory.size>20)operationHistory.delete(id);}
+  let retained=0,count=0;for(const [id,op] of [...operationHistory].reverse()){count++;retained+=canonical(op.before).length+canonical(op.after).length;if(retained>SNAPSHOT_LIMIT*2||count>20)operationHistory.delete(id);}
   figma.commitUndo?.();return {...result,operationId,diff,undo:{supported:true,sessionOnly:true},plan};
  }catch(error){progress('rolling-back');let rollback;try{rollback=await restoreState(before,command);}catch(restoreError){rollback={ok:false,errors:[{step:'restore',error:restoreError.message}]};}throw Object.assign(Error(error.message),{details:{failedStep:currentStep,completedSteps:completedSteps.map(s=>({step:s.step,type:s.type})),rollback}});}
 }
-async function executeWrite(c,progress){if(c.type==='repair-layout')return executeVisualRepair(c);return isHighLevel(c.type)?executeHighLevel(c,progress):executeLegacy(c,progress);}
+async function executeWrite(c,progress){if(apiWrites.has(c.type))return executeApiCommand(c,progress);if(c.type==='repair-layout')return executeVisualRepair(c);return isHighLevel(c.type)?executeHighLevel(c,progress):executeLegacy(c,progress);}

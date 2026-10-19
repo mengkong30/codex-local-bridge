@@ -40,3 +40,7 @@ Default general canvas size 360 × 220. Charts require enough room for labels/le
 ```
 
 To update, resend the same logical keys with new data and a **new** idempotencyKey. Existing node IDs remain; only changed properties appear in diff. For the smallest update, use returned node ID in update-node. Use dry-run first, then validate-layout and screenshot review. The supplied runtime test asserts a changed KPI updates only a small subset of nodes while retaining all IDs.
+
+## 0.8.0 布局扩展
+
+apply-auto-layout 新增 props（统一属性白名单）与 childLayouts:[{nodeId,props}]，后者只接受直接子节点。可通过 props 配置换行、Grid、尺寸模式与约束。Grid 不套用仅适用于横/纵布局的默认轴参数。详情见 docs/EXPANDED-API.md。

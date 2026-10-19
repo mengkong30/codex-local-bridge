@@ -1,5 +1,6 @@
 import {optionsFromEnv,startCoordinatedServer,VERSION} from './bridge-discovery.mjs';
 import http from 'node:http';
+import apiContract from './api-contract.json' with {type:'json'};
 import {createHash, randomUUID} from 'node:crypto';
 
 const serviceOptions=optionsFromEnv();const host='127.0.0.1';let port=serviceOptions.port;
@@ -31,15 +32,15 @@ function electHub() {
 }
 function hubInfo() { return {connectionId:hubConnectionId, fileName:sessions.get(hubConnectionId)?.document.fileName || null, revision:hubRevision}; }
 function panelState(s) {
-  return {ok:true, serverVersion:VERSION, instanceId, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, panelProtocol:1, self:info(s), hub:hubInfo(),
+  return {ok:true, serverVersion:VERSION, instanceId, apiProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, panelProtocol:1, self:info(s), hub:hubInfo(),
     connections:[...sessions.values()].filter(active).map(info).concat([...offlineSessions.values()])};
 }
 const origins = new Set(['null', 'https://www.figma.com', 'https://figma.com']);
-const reads = new Set(['ping', 'bridge-capabilities', 'get-document-info', 'get-pages', 'get-node', 'get-fonts', 'export-node','validate-layout','review-layout','operation-history']);
-const writes = new Set(['build-section', 'update-node', 'import-image', 'design-system','batch','undo-operation','create-panel','create-kpi-card','create-line-chart','create-donut-chart','create-digital-twin-map','create-component','create-variable-collection','apply-auto-layout','repair-layout']);
+const reads = new Set([...apiContract.reads,'ping', 'bridge-capabilities', 'get-document-info', 'get-pages', 'get-node', 'get-fonts', 'export-node','validate-layout','review-layout','operation-history']);
+const writes = new Set([...apiContract.writes,'build-section', 'update-node', 'import-image', 'design-system','batch','undo-operation','create-panel','create-kpi-card','create-line-chart','create-donut-chart','create-digital-twin-map','create-component','create-variable-collection','apply-auto-layout','repair-layout']);
 const fileActions = new Set(['page', 'collection', 'variable', 'text-style', 'effect-style']);
 const isWrite = c => writes.has(c.type) && !(c.type === 'design-system' && c.action === 'inspect');
-const needsFile = c => c.type === 'import-image' || c.type === 'create-variable-collection' || c.type === 'design-system' && fileActions.has(c.action) || c.type === 'batch' && (c.commands||[]).some(needsFile);
+const needsFile = c => apiContract.fileWrites.includes(c.type) || c.type==='instance-action'&&!!c.componentKey || c.type === 'import-image' || c.type === 'create-variable-collection' || c.type === 'design-system' && fileActions.has(c.action) || c.type === 'batch' && (c.commands||[]).some(needsFile);
 const fail = (message, status = 409) => { throw Object.assign(new Error(message), {status}); };
 const active = s => s && !s.disconnected && !s.retired && Date.now() - s.seen < TTL;
 const used = id => [...requests.values()].some(t => t.bindingId === id) || [...sessions.values()].some(s => s.commandInfo?.bindingId === id);
@@ -122,7 +123,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && !/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) fail('application/json required', 415);
     if (Number(req.headers['content-length']) > MAX_BODY) fail('Request body exceeds 32 MiB', 413);
     sweep(); const url = new URL(req.url, `http://${host}:${port}`), path = url.pathname;
-    if (req.method === 'GET' && path === '/health') return json(res, 200, {ok:true, serverName:'codex-local-bridge', protocolVersion:2, serverVersion:VERSION, instanceId, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, controllerProtocol:1, panelProtocol:1, hub:hubInfo(), figmaConnected:[...sessions.values()].some(active), connections:[...sessions.values()].filter(active).map(info)});
+    if (req.method === 'GET' && path === '/health') return json(res, 200, {ok:true, serverName:'codex-local-bridge', protocolVersion:2, serverVersion:VERSION, instanceId, apiProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, controllerProtocol:1, panelProtocol:1, hub:hubInfo(), figmaConnected:[...sessions.values()].some(active), connections:[...sessions.values()].filter(active).map(info)});
     if (req.method === 'GET' && path === '/operations') {
       const clientId=url.searchParams.get('clientId');client(clientId);
       const key=url.searchParams.get('idempotencyKey'), connectionId=url.searchParams.get('connectionId');
@@ -146,7 +147,7 @@ const server = http.createServer(async (req, res) => {
       if (!active(s)) { s = {id:randomUUID(), queue:[], busy:null, uncertain:false, waiter:null}; sessions.set(s.id, s); }
       s.document = p.document || {}; s.seen = Date.now();
       electHub();
-      return json(res, 200, {ok:true, connectionId:s.id, serverVersion:VERSION, instanceId, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, controllerProtocol:1, panelProtocol:1, hub:hubInfo()});
+      return json(res, 200, {ok:true, connectionId:s.id, serverVersion:VERSION, instanceId, apiProtocol:1, discoveryProtocol:1, profile:serviceOptions.profile, endpoint:'http://localhost:'+port, reliabilityProtocol:1, controllerProtocol:1, panelProtocol:1, hub:hubInfo()});
     }
     if (path === '/panel/promote') {
       const caller = session(p.connectionId), target = session(p.targetConnectionId || p.connectionId);
@@ -231,6 +232,8 @@ const server = http.createServer(async (req, res) => {
         else if (list.length === 1) s = list[0];
         else fail(list.length ? 'Multiple files connected; specify connectionId' : 'No Figma connection available');
       }
+      if(s.document.editorType==='dev'&&isWrite(p))fail('Dev Mode is read-only; use Design to write');
+      if([...apiContract.reads,...apiContract.writes].includes(p.type)&&!(s.document.bridgeVersion>=11))fail('Reopen Figma plugin runtime v11 for expanded API commands');
       let operationKey, fingerprint;
       if (p.idempotencyKey !== undefined) {
         if (!b || typeof p.idempotencyKey!=='string' || !p.idempotencyKey.trim() || p.idempotencyKey.length>160) fail('idempotencyKey requires a binding and 1–160 characters',400);

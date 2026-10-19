@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 // Exact bytes of the visually reviewed UI fixture screenshot; other binaries still fail.
-const reviewedImages=new Map([['docs/assets/control-panel.png','2b26557086396299b3376ef100ab4592ad9f4bae0c5842b8fdb7a7377e976c4a']]);
+const reviewedImages=new Map([['docs/assets/control-panel.png','e69cd45e216c1d6e10fd333873cffc5357d6438e42124d6196091851c94360ba']]);
 const patterns=[
  ['personal Windows directory',/[A-Za-z]:[\\/]Users[\\/](?!Public(?:[\\/]|$)|<)[^\s<>"']+/i],
  ['Figma file link',/figma\.com\/(?:design|file)\/[A-Za-z0-9]{15,}/],

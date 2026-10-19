@@ -5,7 +5,9 @@
   "main": "code.js",
   "ui": "ui.html",
   "editorType": [
-    "figma"
+    "figma",
+    "figjam",
+    "slides"
   ],
   "networkAccess": {
     "allowedDomains": [
@@ -21,5 +23,9 @@
       "http://localhost:37827",
       "http://localhost:37828"
     ]
-  }
+  },
+  "documentAccess": "dynamic-page",
+  "permissions": [
+    "teamlibrary"
+  ]
 }

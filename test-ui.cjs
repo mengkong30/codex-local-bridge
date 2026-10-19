@@ -7,8 +7,8 @@ const html=fs.readFileSync(path.join(__dirname,'figma/ui.html'),'utf8').replace(
 const server=spawn(process.execPath,[path.join(__dirname,'bridge-server.mjs')],{env:{...process.env,BRIDGE_PORT:String(port),BRIDGE_READ_TIMEOUT_MS:'5000',BRIDGE_WRITE_TIMEOUT_MS:'20000'},stdio:['ignore','ignore','inherit'],windowsHide:true});
 async function post(route,p){const r=await fetch(base+route,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(p)});return {status:r.status,...await r.json()};}
 async function health(){return (await fetch(base+'/health')).json();}
-const fixtureA={fileName:'示例文件 A',pageId:'p1',pageName:'示例页面 A',bridgeVersion:10,panelProtocol:1,pages:[{id:'p2',name:'示例页面 B'},{id:'p1',name:'示例页面 A'}],selection:[]};
-const fixtureB={fileName:'示例文件 B',pageId:'p1',pageName:'示例页面 C',bridgeVersion:10,panelProtocol:1,pages:[{id:'p1',name:'示例页面 C'},{id:'p2',name:'示例页面 D'}],selection:[]};
+const fixtureA={fileName:'示例文件 A',pageId:'p1',pageName:'示例页面 A',bridgeVersion:11,panelProtocol:1,pages:[{id:'p2',name:'示例页面 B'},{id:'p1',name:'示例页面 A'}],selection:[]};
+const fixtureB={fileName:'示例文件 B',pageId:'p1',pageName:'示例页面 C',bridgeVersion:11,panelProtocol:1,pages:[{id:'p1',name:'示例页面 C'},{id:'p2',name:'示例页面 D'}],selection:[]};
 (async()=>{
  let browser;
  try{

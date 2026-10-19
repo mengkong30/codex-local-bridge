@@ -61,7 +61,8 @@ async function executeHighLevel(c,progress){
  if(c.type==='apply-auto-layout'){
   const n=await figma.getNodeByIdAsync(c.nodeId);if(!n||!('layoutMode' in n))throw Error('Auto layout requires a frame/component');
   const props={layoutMode:c.direction||'VERTICAL',itemSpacing:c.gap??tokensFor(c).spacing.medium,paddingLeft:c.padding??16,paddingRight:c.padding??16,paddingTop:c.padding??16,paddingBottom:c.padding??16,primaryAxisSizingMode:c.primaryAxisSizingMode||'AUTO',counterAxisSizingMode:c.counterAxisSizingMode||'FIXED',primaryAxisAlignItems:c.primaryAxisAlignItems||'MIN',counterAxisAlignItems:c.counterAxisAlignItems||'MIN'};
-  for(const [k,v] of Object.entries(props))n[k]=v;return {id:n.id,path:nodePath(n)};
+  const merged={...props,...c.props};if(merged.layoutMode==='GRID')for(const key of ['primaryAxisSizingMode','counterAxisSizingMode','primaryAxisAlignItems','counterAxisAlignItems','itemSpacing'])if(c.props?.[key]===undefined)delete merged[key];
+  await planAutoLayout(c);await applyNodeProps(n,merged);for(const child of c.childLayouts||[])await applyNodeProps(await apiNode(child.nodeId),child.props);return {id:n.id,path:nodePath(n)};
  }
  if(typeof c.key!=='string'||!c.key.trim()||c.key.length>120)throw Error('Stable key (1–120 characters) is required');
  const parent=c.parentId?await figma.getNodeByIdAsync(c.parentId):page;if(!parent||!('appendChild' in parent))throw Error('Parent cannot contain nodes');

@@ -1,0 +1,32 @@
+{
+  "name": "Codex Local Bridge \u00b7 Dev Inspect",
+  "id": "codex-local-bridge-dev-inspect",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": [
+    "dev"
+  ],
+  "networkAccess": {
+    "allowedDomains": [
+      "none"
+    ],
+    "devAllowedDomains": [
+      "http://localhost:37821",
+      "http://localhost:37822",
+      "http://localhost:37823",
+      "http://localhost:37824",
+      "http://localhost:37825",
+      "http://localhost:37826",
+      "http://localhost:37827",
+      "http://localhost:37828"
+    ]
+  },
+  "documentAccess": "dynamic-page",
+  "permissions": [
+    "teamlibrary"
+  ],
+  "capabilities": [
+    "inspect"
+  ]
+}

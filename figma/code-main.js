@@ -15,14 +15,14 @@ function documentInfo(page = figma.currentPage) {
     fileKey: figma.fileKey || null,
     editorType: figma.editorType,
     fileName: figma.root.name,
-    bridgeVersion: 10,
+    bridgeVersion: 11,
     connectionSettings:bridgeSettings,
     panelProtocol: 1,
     pages: figma.root.children.map(p => ({id:p.id, name:p.name})),
     pageId: page.id,
     pageName: page.name,
     viewingPageId: figma.currentPage.id,
-    selection: page.selection.map((node) => ({
+    selection: (page.selection||[]).map((node) => ({
       id: node.id,
       name: node.name,
       type: node.type
@@ -37,10 +37,11 @@ async function commandPage(command) {
   const target = command.target;
   const page = await figma.getNodeByIdAsync(target.pageId);
   if (!page || page.type !== 'PAGE') throw Error('Bound page no longer exists; bind another page explicitly');
+  if(typeof page.loadAsync==='function')await page.loadAsync();
   const fileActions = ['page','collection','variable','text-style','effect-style'];
   if (target.scope !== 'file') {
-    if (command.type === 'import-image' || command.type === 'design-system' && fileActions.includes(command.action)) throw Error('Document-wide operation requires an exclusive file binding');
-    const ids = ['nodeId','parentId','childId','sourceId'].map(key => command[key]).filter(Boolean).concat(command.nodeIds || []);
+    if (fileApiCommand(command) || command.type === 'import-image' || command.type === 'design-system' && fileActions.includes(command.action)) throw Error('Document-wide operation requires an exclusive file binding');
+    const ids = ['nodeId','parentId','childId','sourceId'].map(key => command[key]).filter(Boolean).concat(command.nodeIds || [],command.type==='slides-action'&&Array.isArray(command.grid)?command.grid.flat():[],command.type==='figjam-action'?[command.connectorStart?.endpointNodeId,command.connectorEnd?.endpointNodeId].filter(Boolean):[]);
     for (const id of ids) {
       let node = await figma.getNodeByIdAsync(id);
       if (!node) throw Error('Target node no longer exists: ' + id);
@@ -160,73 +161,22 @@ async function designSystemCommand(c) {
 
 async function executeLegacy(command, progress) {
     const page = await commandPage(command);
-    const readTypes = ['ping','bridge-capabilities','get-document-info','get-pages','get-node','get-fonts','export-node','validate-layout','operation-history'];
+    const readTypes = [...API_CONTRACT.reads,'ping','bridge-capabilities','get-document-info','get-pages','get-node','get-fonts','export-node','validate-layout','operation-history'];
     if (!command.target && !readTypes.includes(command.type) && !(command.type === 'design-system' && command.action === 'inspect')) throw Error('Writes require an explicit controller binding; update the local bridge');
     let result;
+    if (apiReads.has(command.type)||apiWrites.has(command.type)) return executeApiCommand(command,progress);
     if (command.type === "ping") {
       result = { pong: true, at: new Date().toISOString() };
     } else if (command.type === "bridge-capabilities") {
-      result = {version:10, visualReviewProtocol:1, fileCreation:{supported:false,alternative:"design-system page"}, reliabilityProtocol:1, layoutValidation:true, highLevelDsl:true, panelProtocol:1, controllerProtocol:1, pageIsolation:true, diagnostics:true, fontPreflight:true, textAlignment:{create:true,update:true,vertical:['TOP','CENTER','BOTTOM'],horizontal:['LEFT','CENTER','RIGHT','JUSTIFIED']}, commands:['review-layout','repair-layout','batch','undo-operation','operation-history','validate-layout',...highLevelTypes,'design-system','get-fonts','import-image','build-section','update-node','get-document-info','get-pages','get-node','export-node']};
+      result = {version:11, api:apiCapabilities(), visualReviewProtocol:1, fileCreation:{supported:false,alternative:"design-system page"}, reliabilityProtocol:1, layoutValidation:true, highLevelDsl:true, panelProtocol:1, controllerProtocol:1, pageIsolation:true, diagnostics:true, fontPreflight:true, textAlignment:{create:true,update:true,vertical:['TOP','CENTER','BOTTOM'],horizontal:['LEFT','CENTER','RIGHT','JUSTIFIED']}, commands:[...API_CONTRACT.reads,...API_CONTRACT.writes,'review-layout','repair-layout','batch','undo-operation','operation-history','validate-layout',...highLevelTypes,'design-system','get-fonts','import-image','build-section','update-node','get-document-info','get-pages','get-node','export-node']};
     } else if (command.type === "design-system") { result = await designSystemCommand(command); } else if (command.type === "get-fonts") {
       result = (await figma.listAvailableFontsAsync()).map(item => item.fontName);
     } else if (command.type === "import-image") {
       result = {imageHash:figma.createImage(figma.base64Decode(command.base64)).hash};
     } else if (command.type === "build-section") {
-      const target = command.parentId ? await figma.getNodeByIdAsync(command.parentId) : page;
-      if (!target || !('appendChild' in target)) throw new Error('Parent cannot contain nodes');
-      const created = [];
-      const fonts = new Map();
-      function collectFonts(spec) {
-        if (spec.kind === "TEXT") fonts.set(JSON.stringify(spec.fontName), spec.fontName);
-        for (const child of spec.children || []) collectFonts(child);
-      }
-      for (const spec of command.nodes || []) collectFonts(spec);
-      for (const font of fonts.values()) {
-        progress("loading-font", {font});
-        await figma.loadFontAsync(font);
-      }
-      progress("building", {fontCount:fonts.size});
-      async function build(spec, parent) {
-        let node;
-        if (spec.kind === 'SVG') node = figma.createNodeFromSvg(spec.svg);
-        else if (spec.kind === 'INSTANCE') {
-          const source = await figma.getNodeByIdAsync(spec.componentId);
-          if (!source || source.type !== 'COMPONENT') throw new Error('Missing component');
-          node = source.createInstance();
-        } else {
-          const factories = {FRAME:'createFrame',COMPONENT:'createComponent',RECTANGLE:'createRectangle',ELLIPSE:'createEllipse',TEXT:'createText'};
-          if (!factories[spec.kind]) throw new Error('Unsupported kind');
-          node = figma[factories[spec.kind]]();
-        }
-        created.push(node); parent.appendChild(node);
-        if (created.length === 1 || created.length % 20 === 0) progress("building", {created:created.length,nodeName:spec.name||spec.kind});
-        if (spec.kind === 'TEXT') {
-          node.fontName = spec.fontName;
-        }
-        const props = ['name','x','y','fills','strokes','strokeWeight','strokeAlign','cornerRadius','topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius','clipsContent','opacity','effects','fontSize','characters','textAlignHorizontal','textAlignVertical','textAutoResize','lineHeight','letterSpacing','layoutMode','paddingLeft','paddingRight','paddingTop','paddingBottom','itemSpacing','primaryAxisAlignItems','counterAxisAlignItems','primaryAxisSizingMode','counterAxisSizingMode'];
-        validateTextAlignment(node, spec);
-        for (const key of props) if (spec[key] !== undefined) node[key] = spec[key];
-        if (spec.width !== undefined && spec.height !== undefined) node.resize(spec.width,spec.height);
-        for (const child of spec.children || []) await build(child,node);
-        return node;
-      }
-      try {
-        const roots=[];
-        for (const spec of command.nodes || []) roots.push(await build(spec,target));
-        if (command.focus && figma.currentPage.id === page.id) { page.selection=roots;figma.viewport.scrollAndZoomIntoView(roots); }
-        result={roots:roots.map(n=>({id:n.id,name:n.name,width:n.width,height:n.height})),nodes:created.map(n=>({id:n.id,name:n.name,type:n.type}))};
-      } catch(error) {
-        for (const node of created.reverse()) if (!node.removed) node.remove();
-        throw error;
-      }
+      result = await buildApiNodes(command,progress,page);
     } else if (command.type === "update-node") {
-      const node = await figma.getNodeByIdAsync(command.nodeId);
-      if (!node) throw new Error('Node not found');
-      validateTextAlignment(node, command.props);
-      if (node.type==='TEXT') {const fonts=node.getRangeAllFontNames(0,node.characters.length);for(const f of fonts)await figma.loadFontAsync(f);}
-      for(const key of ['x','y','name','fills','strokes','opacity','fontSize','characters','textAlignHorizontal','textAlignVertical','lineHeight','letterSpacing','visible','clipsContent']) if(command.props[key]!==undefined)node[key]=command.props[key];
-      if(command.props.width!==undefined&&command.props.height!==undefined)node.resize(command.props.width,command.props.height);
-      result={id:node.id};
+      const node=await apiNode(command.nodeId);await applyNodeProps(node,command.props);result={id:node.id,name:node.name};
     } else if (command.type === "get-document-info") {
       result = documentInfo(page);
     } else if (command.type === "get-pages") {
@@ -241,7 +191,7 @@ async function executeLegacy(command, progress) {
     } else if (command.type === "get-node") {
       const node = await figma.getNodeByIdAsync(command.nodeId);
       if (!node) throw new Error("Node not found");
-      const properties = ["id", "name", "type", "visible", "x", "y", "width", "height", "opacity", "rotation", "blendMode", "fills", "strokes", "strokeWeight", "strokeAlign", "effects", "cornerRadius", "topLeftRadius", "topRightRadius", "bottomLeftRadius", "bottomRightRadius", "clipsContent", "layoutMode", "layoutSizingHorizontal", "layoutSizingVertical", "primaryAxisAlignItems", "counterAxisAlignItems", "primaryAxisSizingMode", "counterAxisSizingMode", "paddingLeft", "paddingRight", "paddingTop", "paddingBottom", "itemSpacing", "layoutGrow", "layoutAlign", "layoutPositioning", "constraints", "characters", "fontName", "fontSize", "fontWeight", "textAlignHorizontal", "textAlignVertical", "lineHeight", "letterSpacing", "textAutoResize", "textDecoration", "reactions", "exportSettings", "absoluteBoundingBox"];
+      const properties = [...API_CONTRACT.nodeProperties,"id","reactions","componentProperties","explicitVariableModes", "name", "type", "visible", "x", "y", "width", "height", "opacity", "rotation", "blendMode", "fills", "strokes", "strokeWeight", "strokeAlign", "effects", "cornerRadius", "topLeftRadius", "topRightRadius", "bottomLeftRadius", "bottomRightRadius", "clipsContent", "layoutMode", "layoutSizingHorizontal", "layoutSizingVertical", "primaryAxisAlignItems", "counterAxisAlignItems", "primaryAxisSizingMode", "counterAxisSizingMode", "paddingLeft", "paddingRight", "paddingTop", "paddingBottom", "itemSpacing", "layoutGrow", "layoutAlign", "layoutPositioning", "constraints", "characters", "fontName", "fontSize", "fontWeight", "textAlignHorizontal", "textAlignVertical", "lineHeight", "letterSpacing", "textAutoResize", "textDecoration", "reactions", "exportSettings", "absoluteBoundingBox"];
       function serialize(current, depth) {
         const value = {};
         for (const key of properties) {
@@ -263,11 +213,9 @@ async function executeLegacy(command, progress) {
     } else if (command.type === "export-node") {
       const node = await figma.getNodeByIdAsync(command.nodeId);
       if (!node || !("exportAsync" in node)) throw new Error("Node cannot be exported");
-      const format = command.format || "SVG";
-      if (format !== "SVG" && format !== "PNG") throw new Error("Supported formats: SVG, PNG");
-      const settings = format === "SVG" ? { format: "SVG" } : { format: "PNG", constraint: { type: "SCALE", value: Math.min(command.scale || 1, 4) } };
+      const settings=exportOptions(command),format=settings.format;
       const bytes = await node.exportAsync(settings);
-      result = { nodeId: node.id, name: node.name, format, base64: figma.base64Encode(bytes) };
+      result = { nodeId: node.id, name: node.name, format, mimeType:({PNG:'image/png',JPG:'image/jpeg',SVG:'image/svg+xml',PDF:'application/pdf'})[format], base64: figma.base64Encode(bytes) };
     } else {
       throw new Error(`Unsupported command: ${command.type}`);
     }

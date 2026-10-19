@@ -4,7 +4,7 @@
 
 ## 准备
 
-- Figma Desktop，打开你有权修改的 Design 文件。
+- Figma Desktop，打开你有权修改的 文件。
 - Node.js 22 或更新的受支持版本，node 可以从 PATH 启动。
 - 支持本地 stdio MCP 的 AI 客户端。插件本身不包含 AI 模型或服务额度。
 
@@ -41,17 +41,25 @@
 
 第一个接入的现代插件窗口通常成为主控，其他窗口显示精简状态条。显示模式与 AI 绑定目标互相独立。
 
+## 其他编辑器
+
+主 manifest 支持 Design、FigJam 与 Slides。FigJam/Slides 命令只能在对应编辑器执行。团队库读取/导入使用 teamlibrary 权限，库仍需要用户在 Figma 中启用。
+
+Dev Mode 使用单独的 figma/manifest-dev.json，在 Inspect 插件入口运行。它提供 CSS、节点、资源链接和导出等只读能力；服务端与运行时都会拒绝写入。这不是完整代码生成器，也不会绕过 Figma 的权限或席位要求。
+
+更新后让 MCP 宿主重新加载工具，调用 local_figma_capabilities 核对 runtime v11 和 api.protocol 1。
+
 ## 平时使用
 
 打开目标文件并运行 Figma 插件，再让助手连接。MCP 调用可以自动启动本机服务。命令行适配器用法见 `node adapters/dsh-bridge.mjs help`。
 
 需要明确进程生命周期时，在终端运行 `node bridge-server.mjs`，结束时按 Ctrl+C 并关闭 Figma 插件。自动启动的后台服务可能在助手会话结束后保留；不要按端口盲目终止未知进程。
 
-## 升级到 0.7.2
+## 升级到 0.8.0
 
 关闭旧 Figma 插件实例，停止已确认归属的旧桥接服务，更新宿主插件包；重新导入本版 manifest，再在各文件打开插件。旧实例不会自动加载新版代码。
 
-对应版本为：插件包 0.7.2、后台服务 0.7.0、Figma runtime v10。可通过 local_figma_settings、/health.serverVersion 和 bridge-capabilities 核对。三个版本号代表不同组件。
+对应版本为：插件包 0.8.0、后台服务 0.8.0、Figma runtime v11。可通过 local_figma_settings、/health.serverVersion 和 bridge-capabilities 核对。三个版本号代表不同组件。
 
 连接设置保存在插件缓存之外；服务重启或窗口重连后，旧绑定不能继续使用，需要重新绑定。
 

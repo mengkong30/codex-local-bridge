@@ -39,7 +39,7 @@ Usage:
   node adapters/dsh-bridge.mjs document [--connection <id>]
   node adapters/dsh-bridge.mjs pages [--connection <id>]
   node adapters/dsh-bridge.mjs node <nodeId> [--depth 0-50] [--connection <id>]
-  node adapters/dsh-bridge.mjs export <nodeId> [--format png|svg] [--scale 0.1-4] [--out <file>] [--connection <id>]
+  node adapters/dsh-bridge.mjs export <nodeId> [--format png|svg|jpg|pdf] [--scale 0.1-4] [--out <file>] [--connection <id>]
   node adapters/dsh-bridge.mjs command '<json>' [--connection <id>]
   node adapters/dsh-bridge.mjs command @command.json
   node adapters/dsh-bridge.mjs operation <requestId> --client <id> --connection <id>
@@ -286,9 +286,9 @@ async function main() {
 
   if (commandName === 'export') {
     const [nodeId] = positional();
-    if (!nodeId) throw new Error('Usage: node adapters/dsh-bridge.mjs export <nodeId> [--format png|svg] [--scale 0.1-4] [--out <file>]');
+    if (!nodeId) throw new Error('Usage: node adapters/dsh-bridge.mjs export <nodeId> [--format png|svg|jpg|pdf] [--scale 0.1-4] [--out <file>]');
     let format = String(readFlag('--format') || 'png').toLowerCase();
-    if (!['png', 'svg'].includes(format)) throw new Error('--format must be png or svg.');
+    if (!['png', 'svg', 'jpg', 'pdf'].includes(format)) throw new Error('--format must be png, svg, jpg or pdf.');
     const scale = numberFlag('--scale', 1);
     if (scale < 0.1 || scale > 4) throw new Error('--scale must be between 0.1 and 4.');
     const out = path.resolve(readFlag('--out') || `figma-export-${nodeId.replace(/[^a-zA-Z0-9._-]/g, '_')}.${format}`);

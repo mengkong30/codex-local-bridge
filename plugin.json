@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "codex-local-bridge",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "本地 Figma 多 AI 页面控制、目标隔离、执行进度与可编辑设计，无需云端密钥。",
   "author": {
     "name": "mengkong30"
@@ -11,7 +11,7 @@
       "interface": {
         "displayName": "Codex Local Bridge",
         "shortDescription": "统一查看多文件与 AI，精简状态条保持连接",
-        "longDescription": "独立社区项目。一个统一主控窗口查看所有已接入的 Figma 文件、页面、AI 归属和执行状态。其他文件自动收成精简状态条，继续接收任务与回传结果。切换主控只改变显示方式，AI 的页面绑定与执行权限保持不变。每个目标文件仍需运行插件；插件 0.7.2，服务 0.7.0，Figma 执行插件 v10。 本机服务无身份鉴权，页面绑定用于路由与冲突隔离。",
+        "longDescription": "本地连接 AI 与 Figma，创建和修改可编辑图层，支持多 AI 页面分工、统一主控与视觉复检。0.8.0 扩展图层、矢量、布局、富文本、组件、变量模式、原型、导出及多编辑器接口。包/服务 0.8.0，runtime v11；具体能力由运行环境决定。",
         "developerName": "mengkong30",
         "category": "Productivity",
         "capabilities": [],

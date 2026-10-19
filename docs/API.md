@@ -13,3 +13,7 @@
 其他协议见 [主控](../HUB.md)、[连接设置](../CONNECTIONS.md)、[布局](../LAYOUT.md)、[视觉复检](../VISUAL-REVIEW.md) 和 [高层构建](../DSL.md)。
 
 默认读取等待 15 秒，写入和导出 60 秒。BRIDGE_PORT、BRIDGE_PROFILE、BRIDGE_DISCOVERY_PORTS、BRIDGE_STATE_DIR 与超时变量用于本机配置/测试。Figma manifest 默认允许八个端口；范围外端口必须同步允许并重新导入。32 MiB 请求体上限包含 base64 膨胀。
+
+## 0.8.0
+
+新增 17 工具中的 local_figma_capabilities 和一组扩展命令。完整 type/action/字段、JPG/PDF 返回格式、编辑器入口和恢复边界见 [EXPANDED-API.md](EXPANDED-API.md)。api-contract.json 是服务与生成 runtime 的共同契约。新命令要求 runtime v11；Dev 连接在服务端也拒绝写入。

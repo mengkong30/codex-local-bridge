@@ -36,3 +36,7 @@ History is local to the running Figma plugin, max 20 writes / 48 MiB total snaps
 Supported: node build/update, high-level templates, auto-layout, pages, variables/collections, text/effect styles, variable/style bindings, descriptions, clone-component and replace-instance. `replace-instance` creates an instance and **hides/renames** the source to 原始备份; undo removes the new instance and restores source visibility/name.
 
 Non-undoable: image-store insertion, component property definitions, and variant-combining metadata. Dry-run discloses the limitation; explicit `allowNonUndoable:true` is required for standalone execution. Atomic batches reject them. Arbitrary user deletion, remote-library changes, new Figma files, and cross-file transactions are outside this API.
+
+## 0.8.0 扩展恢复边界
+
+统一字段定义覆盖原型 reactions、显式变量模式及四类样式的快照。最新 20 条撤销记录按时间从新到旧保留。真实删除/解组/布尔/flatten、实例内部操作、资源删除/导入和编辑器专用元数据不承诺桥接恢复；它们需要 allowNonUndoable:true，返回 undo.supported:false，并被原子 batch 拒绝。type/action 必须为字面字符串，解析引用后仍复核不可撤销限制。详见 docs/EXPANDED-API.md。

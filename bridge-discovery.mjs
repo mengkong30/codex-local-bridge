@@ -4,7 +4,7 @@ import os from 'node:os';
 import {spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 export const DEFAULT_PORTS=Array.from({length:8},(_,i)=>37821+i);
-export const VERSION='0.7.0';
+export const VERSION='0.8.0';
 export const stateDirectory=()=>process.env.BRIDGE_STATE_DIR||path.join(process.env.LOCALAPPDATA||path.join(os.homedir(),'.local','state'),'CodexLocalBridge');
 export function optionsFromEnv(env=process.env){const explicit=env.BRIDGE_PORT!==undefined,port=Number(env.BRIDGE_PORT||37821),profile=String(env.BRIDGE_PROFILE||(explicit?'port-'+port:'default')).toLowerCase();if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Invalid bridge port');if(!/^[\w.-]{1,60}$/.test(profile))throw Error('Invalid bridge profile');return {port,profile,ports:explicit?[port]:env.BRIDGE_DISCOVERY_PORTS?env.BRIDGE_DISCOVERY_PORTS.split(',').map(p=>{const v=Number(p);if(!Number.isInteger(v)||v<1024||v>65535)throw Error('Invalid discovery port');return v;}):DEFAULT_PORTS};}
 export async function probe(base,timeout=450){try{const r=await fetch(base+'/health',{signal:AbortSignal.timeout(timeout)});if(!r.ok)return null;const h=await r.json();if(!h.ok||h.serverName!=='codex-local-bridge'||h.protocolVersion!==2)return null;return {...h,endpoint:base};}catch{return null;}}
@@ -50,5 +50,5 @@ export async function ensureDiscovered(root,options=optionsFromEnv()){
  for(let i=0;i<45;i++){await new Promise(r=>setTimeout(r,150));const ready=await discover(options);if(ready)return ready;}throw Error('Another client is starting the bridge but no compatible instance became ready');
 }
 export function compatibility(h,runtime){
- const reasons=[];if(h.protocolVersion!==2)reasons.push('Service protocol 2 required');if(h.discoveryProtocol!==1)reasons.push('Service discovery update required (0.7.0)');if(h.controllerProtocol!==1||h.panelProtocol!==1)reasons.push('Controller/panel protocol update required');if(h.reliabilityProtocol!==1)reasons.push('Reliable-write service update required');if(runtime!==undefined&&runtime<10)reasons.push('Reopen Figma plugin runtime v10');return {compatible:!reasons.length,reasons,required:{service:'0.7.0',runtime:10},current:{service:h.serverVersion,runtime},scope:'local installed package; no remote release feed'};
+ const reasons=[];if(h.apiProtocol!==1)reasons.push('Expanded API service update required (0.8.0)');if(h.protocolVersion!==2)reasons.push('Service protocol 2 required');if(h.discoveryProtocol!==1)reasons.push('Service discovery update required (0.7.0)');if(h.controllerProtocol!==1||h.panelProtocol!==1)reasons.push('Controller/panel protocol update required');if(h.reliabilityProtocol!==1)reasons.push('Reliable-write service update required');if(runtime!==undefined&&runtime<11)reasons.push('Reopen Figma plugin runtime v11');return {compatible:!reasons.length,reasons,required:{service:'0.8.0',runtime:11},current:{service:h.serverVersion,runtime},scope:'local installed package; no remote release feed'};
 }
