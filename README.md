@@ -1,29 +1,82 @@
 # Codex Local Bridge
 
-**v0.7.2 · 服务 0.7.0 · Figma runtime v10 · MIT · 独立社区项目 / Unofficial community project**
+### 和 AI 对话，在 Figma 中完成设计。
 
-让支持 MCP 的本地助手连接 Figma Desktop，读取文档、编辑原生图层与组件、检查布局并导出 PNG/SVG。无需 Figma API 密钥，运行时无 npm 第三方依赖。不是 OpenAI 或 Figma 官方插件，也不属于其认证产品。
+连接你的 AI 助手与 Figma Desktop，读取设计、创建可编辑图层、修改界面并检查结果。多个 AI 可以分别负责不同页面，你在同一个面板里查看文件、任务和执行进度。
 
-> 本机服务无身份鉴权，只绑定回环地址，默认在 localhost:37821–37828 发现服务。本机程序可以读写接入的文件；页面绑定用于路由和冲突隔离，来源检查不是身份认证。参阅 [安全说明](SECURITY.md)、[隐私说明](PRIVACY.md) 和 [免责声明](DISCLAIMER.md)。重要设计保留版本历史。
+[![Release](https://img.shields.io/github/v/release/mengkong30/codex-local-bridge?color=27765b)](https://github.com/mengkong30/codex-local-bridge/releases/latest)
+[![Verify](https://github.com/mengkong30/codex-local-bridge/actions/workflows/check.yml/badge.svg)](https://github.com/mengkong30/codex-local-bridge/actions/workflows/check.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-252b35.svg)](LICENSE)
 
-## 本次更新
+**[下载安装](https://github.com/mengkong30/codex-local-bridge/releases/latest)** · [快速开始](#快速开始) · [使用示例](#可以这样开始) · [能力范围](docs/CAPABILITIES.md) · [更新记录](CHANGELOG.md)
 
-- 多个 AI 分别绑定页面或独占文件，拒绝跨页面写入，显示任务和执行进度。
-- 一个统一主控窗口管理接入文件，其他窗口使用精简状态条；支持切换主控、刷新和删除断线记录。
-- dry-run、幂等写入、结果查询、结构化 diff、受支持批次的回滚和冲突保护撤销。
-- 可编辑面板、KPI、折线图、环图、示意地图、组件、变量与自动布局构建，以及布局检查、截图审阅和有界修复。
-- 端口自动发现、同配置单实例、独立连接配置、兼容性检查，以及在已有文件中创建页面。
+![Codex Local Bridge 的主控面板与精简状态条，显示文件、AI 归属和执行进度](docs/assets/control-panel.png)
 
-本地 0.4.x–0.7.1 的变化合并到本次公开发布，没有补造中间版本的 GitHub Release。
+<sub>插件界面截图，使用合成示例数据。左侧为统一主控，右侧为另一文件的精简状态条。</sub>
 
-## 安装与启动
+## 从一句需求，到可以继续编辑的图层
 
-1. 安装 Node.js 22 或更新的受支持版本，确保 node 在 PATH 中。
-2. 下载 [最新 Release](https://github.com/mengkong30/codex-local-bridge/releases/latest) 的 ZIP，按同页 SHA256SUMS.txt 校验；也可克隆仓库。保留目录结构。
-3. Agent Plugins 客户端使用根目录 plugin.json 和 mcp.json；旧 Codex 客户端可使用 .codex-plugin/plugin.json 和 .mcp.json。PLUGIN_ROOT 由宿主展开；本仓库不会修改全局配置。
-4. 普通 MCP 客户端使用下面的配置，将路径替换为本机实际绝对路径。
-5. 在 Figma Desktop 的 Plugins → Development → Import plugin from manifest 导入本包 figma/manifest.json，运行并保持窗口打开。每个目标文件都需要运行插件。
-6. 调用 local_figma_connect 并回读目标文档。服务运行不等于文件已连接；写入前先 local_figma_bind。
+> “在当前页面创建一组指标卡和折线图，保持统一的字体、配色和间距。”
+
+AI 通过桥接工具读取目标页面、执行设计命令，并将结果留在 Figma 中。文字、形状、Frame、组件和图表可以继续选择与编辑；你也可以让 AI 读取已有设计，做下一轮调整。
+
+**无需 Figma API 密钥 · 本机桥接 · 支持多文件 · 运行时无 npm 第三方依赖**
+
+## 为持续迭代设计准备
+
+### 多个 AI，各自负责明确的页面
+
+让一个任务处理桌面端，另一个任务处理移动端。每个 AI 先绑定自己的页面，插件检查写入目标；你切换当前查看的页面，也不会把正在执行的任务带到其他页面。同一文件的命令按顺序执行，不同文件可以独立工作。
+
+### 一个主控，看到所有已接入的任务
+
+主控面板汇总已连接文件、页面归属和执行状态。其他文件里的插件收成精简状态条，继续接收任务与回传结果。可以切换主控、手动刷新和清理断线记录，每份目标文件仍需打开插件。
+
+### 修改前可预览，修改后可检查
+
+复杂修改可以先预演，查看计划中的变动；执行后返回变更记录，支持范围内的操作可以撤销。截图审阅把结果交回当前 AI，结合布局检查继续修正遮挡、裁切和对齐问题。遇到超时，先查询原操作结果，避免重复写入。
+
+## 可以这样开始
+
+把目标页面和需求告诉支持工具调用的 AI 助手：
+
+**搭建一个可编辑页面**
+
+> “连接本地 Figma，在‘概览’页面创建一个宽 1440 的 Frame，包含 4 张指标卡和一张折线图。先确认目标，再开始创建。”
+
+**调整已有设计**
+
+> “读取当前选中的卡片，把标题字号改成 20、正文改成 14，文字左对齐。修改后回读属性并导出预览。”
+
+**检查画面并继续修正**
+
+> “检查这个 Frame 的文字裁切、遮挡和对齐问题，截图审阅后修复能够确定的问题，再给我看结果。”
+
+**让不同任务分工**
+
+> “这个任务只负责‘移动端’页面。绑定后显示任务名‘移动端排版’，完成后释放绑定。”
+
+这些是任务示例，实际结果取决于 AI 的规划、文件内容和当前支持的命令。插件提供读取、执行与检查能力，设计判断由调用它的 AI 完成。
+
+## 你能用它做什么
+
+| 工作 | 插件提供的能力 |
+| --- | --- |
+| 了解已有设计 | 读取文档、页面、选区、节点树、字体及部分样式和变量 |
+| 搭建界面 | 创建原生图层、文字、组件，以及面板、指标卡、折线图、环图和示意地图 |
+| 组织设计基础 | 创建本地变量集合、部分样式和组件变体，绑定支持的变量字段 |
+| 检查与交付 | 布局检查、截图审阅、有界修复、PNG / SVG 导出 |
+| 管理 AI 任务 | 页面或独占文件绑定、进度查看、主控切换、操作结果查询 |
+
+详细字段和未覆盖能力见 [能力范围](docs/CAPABILITIES.md) 与 [API 文档](docs/API.md)。
+
+## 快速开始
+
+准备 **Figma Desktop、Node.js 22+ 和支持本地 stdio MCP 的 AI 客户端**。Codex 插件包和通用 MCP 配置都在仓库中；其他宿主的安装方式取决于它自己的 MCP 支持。
+
+### 1. 下载并连接 AI 客户端
+
+下载 [最新 Release ZIP](https://github.com/mengkong30/codex-local-bridge/releases/latest) 并解压。支持插件包的宿主使用包内配置；通用 MCP 客户端可加入：
 
 ```json
 {
@@ -36,31 +89,33 @@
 }
 ```
 
-Windows JSON 路径可用正斜杠，如 C:/path/to/codex-local-bridge/mcp-server.mjs。宿主找不到 node 时，指定实际 Node 可执行文件路径。发布 ZIP 包含生成的 code.js，导入前无需安装依赖或构建。
+将路径替换为实际绝对路径，然后让客户端重新加载 MCP。无需安装 npm 依赖或构建即可使用发布包。
 
-MCP 调用可自动启动后台服务；需要明确生命周期时，也可在终端运行 `node bridge-server.mjs`，结束时按 Ctrl+C 并关闭 Figma 插件。自动启动的服务可能在助手会话结束后保留；不要按端口盲目结束未知进程。
+### 2. 在 Figma 中运行插件
 
-## 从 v0.3.0 升级
+打开目标文件，选择 **Plugins → Development → Import plugin from manifest**，导入解压目录里的 `figma/manifest.json`，运行 **Codex Local Bridge** 并保持窗口打开。
 
-关闭旧 Figma 插件实例，停止已确认归属的旧桥接服务，更新宿主插件包；重新导入本版 manifest，再在每份文件中打开插件。旧实例不会自动加载新代码。
+### 3. 发出第一个任务
 
-核对插件包 **0.7.2**、`/health.serverVersion` 为 **0.7.0**、`bridge-capabilities.version` 为 **10**。三个版本号代表不同组件。默认发现端口为 37821–37828；范围外端口需要同步修改开发 manifest。
+> “连接本地 Figma，列出已连接文件和页面，读取当前选区。”
 
-## 工具与协议
+确认读到了目标文件后，就可以继续创建或修改设计。写入前 AI 需要绑定明确的目标页面。首次安装、Windows 路径、连接故障与升级步骤见 [安装指南](docs/GETTING-STARTED.md)。
 
-提供 16 个 MCP 工具：连接/状态/设置，文档/页面/图层/导出，绑定/释放，结构化命令、创建页面、操作查询、撤销、布局检查、截图审阅与修复。没有任意 JavaScript 执行接口。
+## 使用范围
 
-- [控制协议](CONTROLLERS.md)：AI 身份、页面/文件绑定、目标隔离与执行进度。
-- [主控面板](HUB.md)：主控、精简条、断线记录与显示切换。
-- [可靠写入](RELIABILITY.md)：dry-run、幂等键、批次回滚、diff、撤销与恢复限制。
-- [高层构建](DSL.md)、[布局检查](LAYOUT.md) 与 [视觉复检](VISUAL-REVIEW.md)。
-- [连接设置](CONNECTIONS.md) 与 [HTTP API](docs/API.md)。
+当前面向 **Figma Design**，覆盖常用设计构建与检查流程。完整原型交互、部分高级文字/布局/组件操作，以及 FigJam、Slides 尚未接入；[查看具体范围](docs/CAPABILITIES.md)。
 
-同一文件连接串行，不同文件可并行；没有跨文件事务。操作已派发后超时不代表失败，先查询结果并核对画布，不能盲目重放。幂等结果只在原服务实例和保留期内有效。回滚与撤销仅覆盖明确支持的操作。
+桥接服务只监听本机回环地址，无身份鉴权，适合可信的个人设备。若使用云端 AI，模型处理的设计内容仍可能离开本机。回滚、撤销和自动修复均有明确支持范围，详见 [安全说明](SECURITY.md)、[隐私说明](PRIVACY.md) 和 [可靠写入](RELIABILITY.md)。
 
-命令行适配器可运行 `node adapters/dsh-bridge.mjs help` 查看用法。新建 Figma 文件不受支持，可在已有文件内使用独占文件绑定创建页面。
+## 文档与开发
 
-## 开发与验证
+| 文档 | 内容 |
+| --- | --- |
+| [安装指南](docs/GETTING-STARTED.md) | 配置、连接、升级与常见问题 |
+| [能力范围](docs/CAPABILITIES.md) | 已支持功能、部分支持项与限制 |
+| [多 AI 控制](CONTROLLERS.md) · [主控面板](HUB.md) | 页面分工、进度与显示切换 |
+| [高层构建](DSL.md) · [视觉复检](VISUAL-REVIEW.md) | 可编辑构建与截图检查流程 |
+| [API](docs/API.md) · [测试](docs/TESTING.md) | 接口边界与验证方式 |
 
 ```sh
 npm run check
@@ -68,14 +123,8 @@ npm test
 npm run scan
 ```
 
-默认检查和测试只使用 Node 内置模块、隔离端口、合成数据、模拟 Figma API 与 JSON-RPC，无需打开真实设计。修改 figma/runtime-*.js 或 figma/code-main.js 后运行 `npm run build`；检查会验证生成的 figma/code.js 是否同步。
+修改 Figma 源模块后运行 `npm run build`。可选 UI 测试及覆盖范围见 [测试说明](docs/TESTING.md)。欢迎通过 [Issues](https://github.com/mengkong30/codex-local-bridge/issues) 提交脱敏的复现或使用建议。
 
-可选 UI 测试需要 Playwright 开发依赖与 Chromium：`npm install`、`npx playwright install chromium`、`npm run test:ui`。详情、覆盖范围及真实文件烟测步骤见 [验证说明](docs/TESTING.md)。模拟通过不证明所有 Figma API 或宿主版本兼容。
+---
 
-## 许可与反馈
-
-[MIT](LICENSE) 适用于有权许可的代码和文本；第三方软件、字体、设计与商标不由此取得授权。[免责声明](DISCLAIMER.md) 不为 MIT 增加许可限制。
-
-公开包不含真实设计、项目截图、账号配置、第三方字体或 AI 模型额度。若助手使用云端模型，设计内容可能离开本机；本地桥接不代表整个 AI 工作流离线。
-
-反馈请提供版本号和脱敏的最小复现，不要附带密钥、客户设计、文件 key、连接信息或个人路径。安全问题按 [SECURITY.md](SECURITY.md) 处理。
+[MIT License](LICENSE) · 独立社区项目，与 OpenAI、Figma 无官方关联。第三方软件、字体、设计和商标各自遵循其授权，详见 [免责声明](DISCLAIMER.md)。
