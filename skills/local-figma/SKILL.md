@@ -5,7 +5,7 @@ description: Connect AI to local Figma, inspect and edit native design layers, c
 
 # Codex Local Bridge
 
-Current package/service 0.8.1; Figma runtime v11; expanded API protocol 1. Use the installed package's figma/manifest.json for Design/FigJam/Slides. Dev Inspect uses the separate figma/manifest-dev.json and is read-only. Do not claim all Figma features or all editors' APIs are covered.
+Current package/service 0.8.2; Figma runtime v11; expanded API protocol 1. Use the installed package's figma/manifest.json for Design/FigJam/Slides. Dev Inspect uses the separate figma/manifest-dev.json and is read-only. Do not claim all Figma features or all editors' APIs are covered.
 
 ## Connect and identify the target
 
@@ -13,7 +13,7 @@ Use local_figma_connect and local_figma_status. Require successful document read
 
 Call local_figma_capabilities before advanced commands. Inspect api.editor, api.actions, api.nodeProperties, api.rangeProperties and runtime version. Availability depends on Figma version, editor and file permissions. A known field can still be unavailable on the selected node; errors must be handled explicitly.
 
-For the 0.8.1 fixes, also verify the live document bridgePackageVersion is 0.8.1 and the service recoveryProtocol is 1. Reopening the manifest loads new code; runtime v11 alone cannot distinguish 0.8.0 from 0.8.1. File-scope undo still checks the full snapshot, but only changed nodes/resources are restored. Late results must be queried in their original service/connection; never replay an uncertain write.
+For the 0.8.2 fixes, also verify the live document bridgePackageVersion is 0.8.2 and the service recoveryProtocol is 1. Reopening the manifest loads new code; runtime v11 alone cannot distinguish 0.8.0 from 0.8.2. Verify api.performance.protocol is 1. Ordinary edits snapshot their target/dependent auto-layout subtree, even under a file binding; resource commands snapshot resources only. Structural/complex writes retain a broader snapshot. Undo rejects changes within its saved dependency scope and preserves edits outside it. Late results must be queried in their original service/connection; never replay an uncertain write.
 
 Before any write, bind an exact connectionId/pageId with local_figma_bind, actual aiName and short clientName. Never reuse another task's binding. Use scope:file exclusively for global variables/styles/library import and Slides grid operations. Release idle page bindings before claiming the file.
 

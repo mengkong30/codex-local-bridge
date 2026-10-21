@@ -44,6 +44,7 @@ function apiCapabilities() {
   createKinds:[...Object.keys(API_CONTRACT.factories),'SVG','INSTANCE'],exportFormats:['PNG','SVG','JPG','PDF'],
   availability:{teamLibrary,sticky:typeof figma.createSticky==='function'&&figma.editorType==='figjam',slides:typeof figma.createSlide==='function'&&figma.editorType==='slides',devResources:typeof figma.currentPage.getDevResourcesAsync==='function'},
   unsupported:['create-new-file','arbitrary-javascript','remote-library-publishing','full-Figma-UI-automation'],
+  performance:{protocol:1,snapshots:'dependency-scoped',cooperativeTraversal:true,cachedHistorySizes:true},
   recovery:'Destructive/editor-specific operations require allowNonUndoable:true and cannot be included in atomic batches'};
 }
 function validateProps(n, props) {

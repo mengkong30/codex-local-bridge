@@ -16,7 +16,7 @@ function documentInfo(page = figma.currentPage) {
     editorType: figma.editorType,
     fileName: figma.root.name,
     bridgeVersion: 11,
-    bridgePackageVersion: '0.8.1',
+    bridgePackageVersion: '0.8.2',
     connectionSettings:bridgeSettings,
     panelProtocol: 1,
     pages: figma.root.children.map(p => ({id:p.id, name:p.name})),
@@ -30,6 +30,14 @@ function documentInfo(page = figma.currentPage) {
     }))
   };
 }
+let documentInfoTimer=null;
+function scheduleDocumentInfo(){
+ if(documentInfoTimer)return;
+ const send=()=>{documentInfoTimer=null;figma.ui.postMessage({type:'figma-info',payload:documentInfo()});};
+ if(typeof setTimeout==='function')documentInfoTimer=setTimeout(send,120);else send();
+}
+figma.on?.('selectionchange',scheduleDocumentInfo);
+figma.on?.('currentpagechange',scheduleDocumentInfo);
 
 // Validate every destination before mutation. Components used as references may
 // live on library pages; nodes being changed must belong to the bound page.

@@ -16,6 +16,9 @@ const fixtureB={fileName:'示例文件 B',pageId:'p1',pageName:'示例页面 C',
   browser=await chromium.launch({headless:true,...(process.env.BRIDGE_BROWSER_CHANNEL?{channel:process.env.BRIDGE_BROWSER_CHANNEL}:{})});
   const page=await browser.newPage({viewport:{width:960,height:820},deviceScaleFactor:2}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
+  const progressPosts=[];let panelRequests=0;
+  page.on('request',r=>{if(r.url().startsWith(base+'/panel?'))panelRequests++;});
+  await page.route(base+'/progress',async route=>{progressPosts.push(route.request().postDataJSON());await route.continue();});
   await page.setContent('<html><body style="margin:0;padding:12px;font:12px Segoe UI;display:flex;gap:16px;align-items:flex-start"></body></html>');
   await page.evaluate(({A,B})=>{
    window.fixtures={A,B};window.pendingCommands={A:[],B:[]};window.resizes=[];
@@ -45,6 +48,15 @@ const fixtureB={fileName:'示例文件 B',pageId:'p1',pageName:'示例页面 C',
   await a.locator('#connectionProfile').fill('invalid profile');await a.getByRole('button',{name:'保存并连接'}).click();await a.locator('#settingsResult').filter({hasText:'配置名称只能'}).waitFor();
   await a.locator('#connectionProfile').fill('port-'+port);await a.locator('#connectionMode').selectOption('manual');await a.getByRole('button',{name:'保存并连接'}).click();await a.locator('#connectionBadge').filter({hasText:'主控 · 已连接'}).waitFor();await a.getByRole('button',{name:'返回',exact:true}).click();
   const b=await add('B');await mode(b,'compact');await mode(a,'hub');
+  // Concurrent refresh callers share one request; unchanged lists keep their DOM.
+  const af=page.frames().find(f=>f.name()==='A');
+  await af.evaluate(()=>refresh());
+  await af.evaluate(()=>{window.listChanges=0;window.listObserver=new MutationObserver(records=>window.listChanges+=records.length);for(const id of ['files','pages','execution'])window.listObserver.observe(document.getElementById(id),{childList:true,subtree:true});});
+  const requestsBefore=panelRequests;
+  await af.evaluate(()=>Promise.all(Array.from({length:20},()=>refresh())));
+  assert.ok(panelRequests-requestsBefore<=2,'Concurrent refreshes must be coalesced');
+  assert.equal(await af.evaluate(()=>window.listChanges),0,'An unchanged snapshot must not rebuild lists');
+  await af.evaluate(()=>window.listObserver.disconnect());
   await b.getByRole('button',{name:'设置',exact:true}).click();await b.locator('#settingsPanel').waitFor();assert.equal(await page.locator('#B').evaluate(n=>n.style.height),'740px');await page.screenshot({path:path.join(out,'connection-settings.png'),fullPage:true});await b.getByRole('button',{name:'返回',exact:true}).click();assert.equal(await page.locator('#B').evaluate(n=>n.style.height),'148px');
 
   let s=await health(),aid=s.connections.find(c=>c.fileName==='示例文件 A').connectionId,bid=s.connections.find(c=>c.fileName==='示例文件 B').connectionId;
@@ -63,8 +75,9 @@ const fixtureB={fileName:'示例文件 B',pageId:'p1',pageName:'示例页面 C',
   const pending=post('/command',{clientId:cb,bindingId:bb.bindingId,type:'build-section',nodes:[]});
   await page.waitForFunction(()=>window.pendingCommands.B.length>0);
   const cmd=await page.evaluate(()=>window.pendingCommands.B[0]);
-  await send('B',{type:'bridge-progress',requestId:cmd.requestId,stage:'building',created:128});
+  await page.locator('#B').evaluate((f,requestId)=>{for(let i=1;i<=128;i++)f.contentWindow.postMessage({pluginMessage:{type:'bridge-progress',requestId,stage:'building',created:i}},'*');},cmd.requestId);
   await a.locator('#execution').filter({hasText:'已创建 128 个图层'}).waitFor();
+  assert.ok(progressPosts.length<=2,'Burst progress must be coalesced');assert.equal(progressPosts.at(-1).created,128);
   await b.locator('#connectionBadge').filter({hasText:'执行中'}).waitFor();
   assert.equal(await b.locator('#disconnect').isDisabled(),true);
   assert.ok(await a.locator('#execution').evaluate(n=>n.getBoundingClientRect().bottom<=document.querySelector('.hub-body').getBoundingClientRect().bottom),'Execution should fit in the standard two-page viewport');

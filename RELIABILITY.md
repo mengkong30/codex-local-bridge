@@ -25,7 +25,7 @@ Retention: keys/results are in service memory for 24 hours after completion, max
 ]}
 ```
 
-File binding is required if any nested step changes file resources. Up to 100 individual write steps; no nested batch, explicit step routing, undo, or non-undoable operations. `$ref` resolves result fields from an earlier `stepId`. A pre-write snapshot covers the bound page (or all pages plus local collections/variables/styles for file scope). Failures restore original values/topology and remove creations, then compare restoration against the snapshot.
+File binding is required if any nested step changes file resources. Up to 100 individual write steps; no nested batch, explicit step routing, undo, or non-undoable operations. `$ref` resolves result fields from an earlier `stepId`. In 0.8.2, simple edits snapshot their dependency roots, resource-only commands snapshot resources, and structural/complex batches retain the bound page (or full file/resource) snapshot. Failures restore original values/topology and remove creations, then compare restoration against the snapshot.
 
 ## Undo
 
@@ -36,6 +36,12 @@ History is local to the running Figma plugin, max 20 writes / 48 MiB total snaps
 Supported: node build/update, high-level templates, auto-layout, pages, variables/collections, text/effect styles, variable/style bindings, descriptions, clone-component and replace-instance. `replace-instance` creates an instance and **hides/renames** the source to 原始备份; undo removes the new instance and restores source visibility/name.
 
 Non-undoable: image-store insertion, component property definitions, and variant-combining metadata. Dry-run discloses the limitation; explicit `allowNonUndoable:true` is required for standalone execution. Atomic batches reject them. Arbitrary user deletion, remote-library changes, new Figma files, and cross-file transactions are outside this API.
+
+## 0.8.2 快照范围与响应性
+
+普通 update-node、set-text-ranges、set-reactions、set-variable-mode、apply-auto-layout 保存目标子树；父级为自动布局时向上扩展连续自动布局祖先，以覆盖子项重排和尺寸变化。简单 batch 合并这些依赖。变量/样式命令只保存资源。结构修改、包含结果引用或混合范围的复杂批次仍使用页面/文件快照。
+
+撤销只检查和恢复该依赖范围，范围内后续修改仍返回冲突；范围外修改不再阻止撤销，也不会被恢复覆盖。视觉回执保存审查根、明确纳入的外部节点和布局依赖，另有 16 MiB 估算保留预算。扫描和比较分批让出主线程，历史快照大小按 UTF-16 字符串长度估算并缓存；实际对象内存可能更高。
 
 ## 0.8.1 恢复性能与迟到结果
 

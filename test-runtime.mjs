@@ -30,7 +30,7 @@ const messages=[];const figma={root,currentPage:page,editorType:'figma',mixed:Sy
 for(const [kind,method] of Object.entries({FRAME:'createFrame',COMPONENT:'createComponent',RECTANGLE:'createRectangle',ELLIPSE:'createEllipse',TEXT:'createText',VECTOR:'createVector',PAGE:'createPage'}))figma[method]=()=>{const n=new Node(kind);(kind==='PAGE'?root:page).appendChild(n);return n;};
 figma.createTextStyle=()=>{const s={id:'ts'+(++seq),name:'',fontName:{family:'Inter',style:'Regular'},fontSize:12,lineHeight:{unit:'AUTO'},letterSpacing:{unit:'PIXELS',value:0},remove(){texts.delete(this.id);}};texts.set(s.id,s);return s;};
 figma.createEffectStyle=()=>{const s={id:'es'+(++seq),name:'',effects:[],remove(){effects.delete(this.id);}};effects.set(s.id,s);return s;};
-const context=vm.createContext({figma,__html__:'',console,Uint8Array,Date,Map,Set,JSON});vm.runInContext(fs.readFileSync(new URL('./figma/code.js',import.meta.url),'utf8'),context);
+const context=vm.createContext({figma,__html__:'',console,Uint8Array,Date,Map,Set,JSON,setTimeout,clearTimeout});vm.runInContext(fs.readFileSync(new URL('./figma/code.js',import.meta.url),'utf8'),context);
 const target={pageId:page.id,scope:'page',bindingId:'binding',clientId:'client'};
 let request=0;async function command(c,t=target){messages.length=0;await figma.ui.onmessage({type:'bridge-command',requestId:'op'+(++request),command:{...c,target:t}});return JSON.parse(JSON.stringify(messages.findLast(m=>m.type==='bridge-result')));}
 async function ok(c,t){const r=await command(c,t);assert.equal(r.ok,true,JSON.stringify(r));return r.result;}

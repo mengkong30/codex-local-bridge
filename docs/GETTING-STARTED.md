@@ -55,11 +55,11 @@ Dev Mode 使用单独的 figma/manifest-dev.json，在 Inspect 插件入口运�
 
 需要明确进程生命周期时，在终端运行 `node bridge-server.mjs`，结束时按 Ctrl+C 并关闭 Figma 插件。自动启动的后台服务可能在助手会话结束后保留；不要按端口盲目终止未知进程。
 
-## 升级到 0.8.1
+## 升级到 0.8.2
 
 关闭旧 Figma 插件实例，停止已确认归属的旧桥接服务，更新宿主插件包；重新导入本版 manifest，再在各文件打开插件。旧实例不会自动加载新版代码。
 
-对应版本为：插件包 0.8.1、后台服务 0.8.1、Figma runtime v11。可通过 local_figma_settings、/health.serverVersion 和 bridge-capabilities 核对。三个版本号代表不同组件。
+对应版本为：插件包 0.8.2、后台服务 0.8.2、Figma runtime v11。可通过 local_figma_settings、/health.serverVersion 和 bridge-capabilities 核对。三个版本号代表不同组件。
 
 连接设置保存在插件缓存之外；服务重启或窗口重连后，旧绑定不能继续使用，需要重新绑定。
 

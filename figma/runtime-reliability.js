@@ -1,6 +1,28 @@
 // In-memory transaction journal. Reopening the plugin intentionally clears undo history.
 const operationHistory = new Map();
 const SNAPSHOT_LIMIT = 24 * 1024 * 1024;
+const snapshotSizes=new WeakMap();
+function traversalPause(){let deadline=Date.now()+8;return async index=>{if(index%32===0&&Date.now()>=deadline){if(typeof setTimeout==='function')await new Promise(resolve=>setTimeout(resolve,0));deadline=Date.now()+8;}};}
+async function snapshotRoots(ids){
+ const roots=new Map();
+ for(const id of ids){let n=await figma.getNodeByIdAsync(id);if(!n)throw Error('Snapshot target missing: '+id);
+  // Resizing a child can reflow its siblings and all enclosing auto-layouts.
+  while(n.parent&& !['PAGE','DOCUMENT'].includes(n.parent.type)&&n.parent.layoutMode&&n.parent.layoutMode!=='NONE')n=n.parent;
+  roots.set(n.id,n);
+ }
+ return {kind:'nodes',roots:[...roots.values()].filter(n=>{for(let p=n.parent;p;p=p.parent)if(roots.has(p.id))return false;return true;}).map(n=>n.id)};
+}
+async function snapshotScope(c){
+ if(['update-node','set-text-ranges','set-reactions','set-variable-mode','apply-auto-layout'].includes(c.type))return snapshotRoots([c.nodeId]);
+ if(['variable-action','style-action','create-variable-collection'].includes(c.type)||c.type==='design-system'&&['collection','variable','text-style','effect-style'].includes(c.action))return {kind:'resources'};
+ if(c.type==='repair-layout'){const review=visualReviews.get(c.reviewId);return review?.state.scope||null;}
+ if(c.type==='batch'){
+  const scopes=[];for(const step of c.commands){if(JSON.stringify(step).includes('"$ref"'))return null;const scope=await snapshotScope(step);if(!scope)return null;scopes.push(scope);}
+  if(scopes.every(s=>s.kind==='resources'))return {kind:'resources'};
+  if(scopes.every(s=>s.kind==='nodes'))return snapshotRoots(scopes.flatMap(s=>s.roots));
+ }
+ return null; // Structural/unknown writes keep the broader conservative snapshot.
+}
 const snapshotFields = [...API_CONTRACT.nodeProperties.filter(k=>k!=='gridPosition'),'reactions','explicitVariableModes','name','visible','locked','x','y','width','height','relativeTransform','fills','strokes','strokeWeight','strokeAlign','opacity','effects','cornerRadius','topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius','clipsContent','fontName','fontSize','characters','textAlignHorizontal','textAlignVertical','textAutoResize','lineHeight','letterSpacing','layoutMode','layoutSizingHorizontal','layoutSizingVertical','layoutGrow','layoutAlign','layoutPositioning','paddingLeft','paddingRight','paddingTop','paddingBottom','itemSpacing','primaryAxisAlignItems','counterAxisAlignItems','primaryAxisSizingMode','counterAxisSizingMode','description','textStyleId','effectStyleId','boundVariables','vectorPaths','textTruncation','maxLines','minWidth','minHeight','maxWidth','maxHeight','constraints'];
 const segmentFields=['fontName','fontSize','fills','lineHeight','letterSpacing','textDecoration','textCase','textStyleId','fillStyleId','hyperlink','listOptions','listSpacing','indentation','paragraphIndent','paragraphSpacing'];
 const cloneValue = v => v === undefined || typeof v === 'symbol' ? undefined : JSON.parse(JSON.stringify(v));
@@ -11,37 +33,46 @@ function nodeSnapshot(n){
  if(n.parent?.layoutMode==='GRID'&&n.gridRowAnchorIndex!==undefined)props.gridPosition={row:n.gridRowAnchorIndex,column:n.gridColumnAnchorIndex};
  return {id:n.id,type:n.type,parentId:n.parent?.id,index:n.parent?.children?.indexOf(n),path:nodePath(n),props,logicalKey:n.getPluginData?.('bridge.logicalKey')||'',segments:n.type==='TEXT'?cloneValue(n.getStyledTextSegments(segmentFields)):undefined};
 }
-async function captureState(command,enforceLimit=true){
+async function captureState(command,enforceLimit=true,scope=null){
  const page=await commandPage(command),file=command.target?.scope==='file';
- if(file)await figma.loadAllPagesAsync();
- const pages=file?figma.root.children:[page],nodes=[];
- function visit(n){nodes.push(nodeSnapshot(n));for(const child of n.children||[])visit(child);}pages.forEach(visit);
- const state={nodes};
- if(file&&figma.editorType==='figma'){
+ if(file&&!scope)await figma.loadAllPagesAsync();
+ const roots=scope?.kind==='resources'?[]:scope?.kind==='nodes'?(await Promise.all(scope.roots.map(id=>figma.getNodeByIdAsync(id)))).filter(Boolean):file?figma.root.children:[page];
+ const nodes=[],stack=[...roots].reverse(),seen=new Set(),pause=traversalPause();let size=0,index=0;
+ while(stack.length){const n=stack.pop();if(seen.has(n.id))continue;seen.add(n.id);const saved=nodeSnapshot(n);nodes.push(saved);size+=JSON.stringify(saved).length*2;
+  if(enforceLimit&&size>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 24 MiB; split the operation before writing');
+  const children=n.children||[];for(let i=children.length-1;i>=0;i--)stack.push(children[i]);await pause(++index);
+ }
+ const state={nodes,...(scope?{scope}:{} )},resources=file&&(!scope||scope.kind==='resources');
+ if(resources&&figma.editorType==='figma'){
   state.collections=(await figma.variables.getLocalVariableCollectionsAsync()).map(v=>({id:v.id,name:v.name,modes:cloneValue(v.modes)}));
   state.variables=(await figma.variables.getLocalVariablesAsync()).map(v=>({id:v.id,name:v.name,description:v.description,scopes:cloneValue(v.scopes),codeSyntax:cloneValue(v.codeSyntax),valuesByMode:cloneValue(v.valuesByMode)}));
   state.textStyles=(await figma.getLocalTextStylesAsync()).map(snapshotStyle);
   state.effectStyles=(await figma.getLocalEffectStylesAsync()).map(snapshotStyle);
  }
- if(file&&figma.editorType==='figma'){for(const [field,method,properties] of [['paintStyles','getLocalPaintStylesAsync',['name','description','paints']],['gridStyles','getLocalGridStylesAsync',['name','description','layoutGrids']]]){if(typeof figma[method]!=='function')continue;state[field]=(await figma[method]()).map(v=>({id:v.id,...Object.fromEntries(properties.filter(k=>v[k]!==undefined).map(k=>[k,cloneValue(v[k])]))}));}}
- if(enforceLimit&&canonical(state).length>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 24 MiB; split the operation before writing');
+ if(resources&&figma.editorType==='figma'){for(const [field,method,properties] of [['paintStyles','getLocalPaintStylesAsync',['name','description','paints']],['gridStyles','getLocalGridStylesAsync',['name','description','layoutGrids']]]){if(typeof figma[method]!=='function')continue;state[field]=(await figma[method]()).map(v=>({id:v.id,...Object.fromEntries(properties.filter(k=>v[k]!==undefined).map(k=>[k,cloneValue(v[k])]))}));}}
+ for(const field of Object.keys(state))if(!['nodes','scope'].includes(field))for(const item of state[field]){size+=JSON.stringify(item).length*2;await pause(++index);}
+ if(enforceLimit&&size>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 24 MiB; split the operation before writing');
+ snapshotSizes.set(state,size);
  return state;
 }
 async function restoreState(before,command,progress=()=>{},currentState=null){
  const errors=[];const attempt=async(label,fn)=>{try{await fn();}catch(e){errors.push({step:label,error:errorMessage(e)});}};
- const now=currentState||await captureState(command,false),ids=new Set(before.nodes.map(n=>n.id)),current=new Map(now.nodes.map(n=>[n.id,n]));
+ const now=currentState||await captureState(command,false,before.scope),ids=new Set(before.nodes.map(n=>n.id)),current=new Map(now.nodes.map(n=>[n.id,n]));
  const topologyChanged=now.nodes.some(s=>!ids.has(s.id))||before.nodes.some(s=>{const a=current.get(s.id);return !a||a.parentId!==s.parentId||a.index!==s.index;});
  const loadedFonts=new Set();
  async function loadFonts(fonts){for(const font of fonts){const key=canonical(font);if(loadedFonts.has(key))continue;await figma.loadFontAsync(font);loadedFonts.add(key);}}
+ const savedById=new Map(before.nodes.map(n=>[n.id,n])),depths=new Map();
+ function depth(n){if(!depths.has(n.id))depths.set(n.id,savedById.has(n.parentId)?depth(savedById.get(n.parentId))+1:0);return depths.get(n.id);}
+ const restorationOrder=[...before.nodes].sort((a,b)=>depth(a)-depth(b)||String(a.parentId).localeCompare(String(b.parentId))||(a.index??0)-(b.index??0));
  // Restore original topology before removing created containers (e.g. variant sets).
- for(const s of before.nodes){const previous=current.get(s.id);if(!previous){errors.push({step:s.id,error:'Original node was removed'});continue;}
+ for(const s of restorationOrder){const previous=current.get(s.id);if(!previous){errors.push({step:s.id,error:'Original node was removed'});continue;}
   if(previous.parentId===s.parentId&&previous.index===s.index)continue;
   const n=await figma.getNodeByIdAsync(s.id);
   if(s.parentId)await attempt('parent:'+s.id,async()=>{const parent=await figma.getNodeByIdAsync(s.parentId);if(n.parent?.id!==s.parentId||parent.children.indexOf(n)!==s.index)parent.insertChild(Math.min(s.index,parent.children.length),n);});
  }
  for(const s of [...now.nodes].reverse())if(!ids.has(s.id))await attempt('remove:'+s.id,async()=>{const n=await figma.getNodeByIdAsync(s.id);if(n&&!n.removed)n.remove();});
  // Reparenting and removals can change auto-layout. Compare after restoring topology.
- const aligned=topologyChanged?new Map((await captureState(command,false)).nodes.map(n=>[n.id,n])):current;
+ const aligned=topologyChanged?new Map((await captureState(command,false,before.scope)).nodes.map(n=>[n.id,n])):current;
  const changedNodes=before.nodes.filter(s=>{const a=aligned.get(s.id);return a&&(canonical(a.props)!==canonical(s.props)||canonical(a.segments)!==canonical(s.segments)||a.logicalKey!==s.logicalKey);});
  progress('restoring',{changedNodes:changedNodes.length,totalNodes:before.nodes.length});
  let restoredNodes=0;
@@ -76,14 +107,14 @@ async function restoreState(before,command,progress=()=>{},currentState=null){
    });
   }
  }
- const residual=stateDiff(before,await captureState(command,false));if(residual.length)errors.push({step:'verify-restoration',error:'State differs from the saved snapshot',nodes:residual.map(d=>d.id)});
+ const residual=await stateDiff(before,await captureState(command,false,before.scope));if(residual.length)errors.push({step:'verify-restoration',error:'State differs from the saved snapshot',nodes:residual.map(d=>d.id),changes:residual.slice(0,5)});
  return {ok:!errors.length,errors};
 }
-function stateDiff(before,after){
- const changes=[];
+async function stateDiff(before,after){
+ const changes=[],pause=traversalPause();let index=0;
  for(const field of ['nodes','collections','variables','textStyles','effectStyles','paintStyles','gridStyles']){
   const old=new Map((before[field]||[]).map(n=>[n.id,n])),next=new Map((after[field]||[]).map(n=>[n.id,n]));
-  for(const id of new Set([...old.keys(),...next.keys()])){const a=old.get(id),b=next.get(id);if(canonical(a)===canonical(b))continue;
+  for(const id of new Set([...old.keys(),...next.keys()])){await pause(++index);const a=old.get(id),b=next.get(id);if(canonical(a)===canonical(b))continue;
    const properties=[];for(const key of new Set([...Object.keys(a?.props||a||{}),...Object.keys(b?.props||b||{})])){const x=(a?.props||a)?.[key],y=(b?.props||b)?.[key];if(canonical(x)!==canonical(y))properties.push({property:key,before:x??null,after:y??null});}
    if(a&&b&&a.index!==b.index)properties.push({property:'index',before:a.index,after:b.index});
    if(a&&b&&a.parentId!==b.parentId)properties.push({property:'parentId',before:a.parentId,after:b.parentId});
@@ -92,6 +123,14 @@ function stateDiff(before,after){
   }
  }
  return changes;
+}
+async function statesEqual(a,b){
+ const pause=traversalPause();let index=0;
+ for(const field of ['nodes','collections','variables','textStyles','effectStyles','paintStyles','gridStyles']){
+  const old=a[field]||[],next=b[field]||[];if(old.length!==next.length)return false;const byId=new Map(next.map(n=>[n.id,n]));
+  for(const item of old){if(canonical(item)!==canonical(byId.get(item.id)))return false;await pause(++index);}
+ }
+ return true;
 }
 const readCommands=new Set([...API_CONTRACT.reads,'ping','bridge-capabilities','get-document-info','get-pages','get-node','get-fonts','export-node','validate-layout','review-layout','operation-history']);
 function nonUndoable(c){return extendedNonUndoable(c)||(c.type==='import-image'?'Image bytes cannot be removed from the Figma image store':c.type==='design-system'&&['property','variants'].includes(c.action)?'Component property definitions and variant metadata cannot be restored reliably':null);}
@@ -154,26 +193,26 @@ async function executeReliable(command,progress,requestId){
   await commandPage(command);assertWritable();const op=operationHistory.get(command.operationId);if(!op||op.undone)throw Error('Undo snapshot unavailable or already used; history lasts only for this plugin session');
   if(!command.target||command.target.scope!=='file'&&(op.target.scope==='file'||command.target.pageId!==op.target.pageId))throw Error('Undo target is outside the bound scope');
   const originalCommand={...command,target:op.target};
-  const currentState=await captureState(originalCommand,false);
-  if(canonical(currentState)!==canonical(op.after))throw Error('Undo conflict: design changed after this operation; inspect the diff instead of overwriting later edits');
-  if(command.dryRun)return {dryRun:true,operationId:op.operationId,diff:stateDiff(op.after,op.before)};
+  const currentState=await captureState(originalCommand,false,op.after.scope);
+  if(!await statesEqual(currentState,op.after))throw Error('Undo conflict: design changed after this operation; inspect the diff instead of overwriting later edits');
+  if(command.dryRun)return {dryRun:true,operationId:op.operationId,diff:await stateDiff(op.after,op.before)};
   progress('undoing');const restored=await restoreState(op.before,originalCommand,progress,currentState);if(!restored.ok)throw Object.assign(Error('Undo incomplete'),{details:restored});op.undone=true;
-  return {operationId:op.operationId,undone:true,diff:stateDiff(op.after,op.before)};
+  return {operationId:op.operationId,undone:true,diff:await stateDiff(op.after,op.before)};
  }
  if(readCommands.has(command.type)||command.type==='design-system'&&command.action==='inspect')return executeLegacy(command,progress);
  const plan=await planCommand(command);
  if(command.dryRun)return {dryRun:true,plan,writes:0};
  const unsupported=nonUndoable(command);if(unsupported&&!command.allowNonUndoable)throw Error('Cannot reliably undo: '+unsupported+'. Inspect dry-run, then set allowNonUndoable:true explicitly if intended.');
  if(unsupported){figma.commitUndo?.();try{return {...await executeWrite(command,progress),operationId:requestId,undo:{supported:false,reason:unsupported,nativeUndo:true}};}catch(error){throw Object.assign(commandError(error,command),{details:{operationId:requestId,rollback:{ok:false,unsupported:true},nativeUndo:true}});}finally{figma.commitUndo?.();}}
- const before=await captureState(command),steps=Object.create(null),completedSteps=[];let currentStep=null;
+ const scope=await snapshotScope(command),before=await captureState(command,true,scope),steps=Object.create(null),completedSteps=[];let currentStep=null;
  try{
   progress('snapshot-saved',{nodes:before.nodes.length});let result;
   if(command.type==='batch'){
    for(const [i,raw] of command.commands.entries()){currentStep=raw.stepId||String(i);if(Object.hasOwn(steps,currentStep))throw Error('Duplicate stepId');const step={...resolveReferences(raw,steps),target:command.target};if(nonUndoable(step))throw Error('Atomic batch cannot include a resolved non-undoable step');await planCommand(step);steps[currentStep]=await executeWrite(step,progress);completedSteps.push({step:currentStep,type:step.type,result:steps[currentStep]});}result={steps:completedSteps};
   }else result=await executeWrite({...command,nextReviewId:requestId+'-review'},progress);
-  const after=await captureState(command),diff=stateDiff(before,after);
-  const operationId=requestId;operationHistory.set(operationId,{operationId,target:command.target,type:command.type,createdAt:new Date().toISOString(),before,after,undone:false});
-  let retained=0,count=0;for(const [id,op] of [...operationHistory].reverse()){count++;retained+=canonical(op.before).length+canonical(op.after).length;if(retained>SNAPSHOT_LIMIT*2||count>20)operationHistory.delete(id);}
+  const after=await captureState(command,true,scope),diff=await stateDiff(before,after);
+  const operationId=requestId;operationHistory.set(operationId,{operationId,target:command.target,type:command.type,createdAt:new Date().toISOString(),before,after,bytes:snapshotSizes.get(before)+snapshotSizes.get(after),undone:false});
+  let retained=0,count=0;for(const [id,op] of [...operationHistory].reverse()){count++;retained+=op.bytes;if(retained>SNAPSHOT_LIMIT*2||count>20)operationHistory.delete(id);}
   figma.commitUndo?.();return {...result,operationId,diff,undo:{supported:true,sessionOnly:true},plan};
  }catch(error){progress('rolling-back');let rollback;try{rollback=await restoreState(before,command,progress);}catch(restoreError){rollback={ok:false,errors:[{step:'restore',error:errorMessage(restoreError)}]};}const failedCommand=currentStep===null?command:command.commands.find((s,i)=>(s.stepId||String(i))===currentStep);throw Object.assign(commandError(error,failedCommand),{details:{failedStep:currentStep,completedSteps:completedSteps.map(s=>({step:s.step,type:s.type})),rollback}});}
 }
