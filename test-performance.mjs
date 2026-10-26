@@ -27,10 +27,11 @@ b.x=8;assert.match((await command({type:'undo-operation',operationId:reflow.oper
 for(let i=0;i<24;i++)await ok({type:'update-node',nodeId:rect.id,props:{rotation:i}});
 const history=await ok({type:'operation-history'});assert.ok(history.length<=20);assert.ok(history.every(o=>Number.isFinite(o.bytes)&&o.bytes>0&&o.bytes<50000));
 assert.equal(unrelatedReads,0);assert.equal(allPageLoads,0);
-// A broad structural snapshot is still covered, but yields to a real timer.
+// Manual-parent creation now snapshots parent order, not 600 unrelated descendants.
 const smallPage=figma.createPage();for(let i=0;i<600;i++)smallPage.appendChild(figma.createRectangle());
 let ticks=0;const timer=setInterval(()=>ticks++,0);let created;
 try{created=await ok({type:'create-node',node:{kind:'FRAME',name:'Cooperative structural test'}},{...fileTarget,pageId:smallPage.id,scope:'page'});}finally{clearInterval(timer);}
-assert.ok(ticks>0,'Large traversal must yield to a macrotask');assert.ok(registry.has(created.id));
+assert.ok(nodeCountForCreation()<=2,'Creation should only snapshot its parent container');assert.ok(registry.has(created.id));
+function nodeCountForCreation(){return messages.find(m=>m.stage==='snapshot-saved').nodes;}
 figma.loadAllPagesAsync=originalLoad;
-console.log('PASS performance: 5000 unrelated nodes read 0 times; scoped update/undo '+elapsedMs.toFixed(1)+' ms in synthetic host; resource/review isolation, reflow conflict guard, cached history sizes and cooperative structural scan ('+ticks+' timer ticks)');
+console.log('PASS performance: 5000 unrelated nodes read 0 times; scoped update/undo '+elapsedMs.toFixed(1)+' ms in synthetic host; resource/review isolation, reflow conflict guard, cached history sizes and compact structural creation');

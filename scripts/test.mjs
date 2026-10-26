@@ -5,7 +5,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const state=await fs.mkdtemp(path.join(os.tmpdir(),'bridge-public-tests-'));
-const tests=['test-security.mjs','test-reliability.mjs','test-mcp.mjs','test-hub.mjs','test-operations.mjs','test-integration.mjs','test-discovery.mjs','test-review.mjs','test-review-mcp.mjs','test-settings.mjs','test-api-integration.mjs','test-fixes.mjs','test-performance.mjs'];
+const tests=['test-security.mjs','test-reliability.mjs','test-mcp.mjs','test-hub.mjs','test-operations.mjs','test-integration.mjs','test-discovery.mjs','test-review.mjs','test-review-mcp.mjs','test-settings.mjs','test-api-integration.mjs','test-fixes.mjs','test-performance.mjs','test-snapshot-limit.mjs','test-structural-snapshots.mjs'];
 try{
  for(const file of tests){
   console.log('\nRunning '+file);

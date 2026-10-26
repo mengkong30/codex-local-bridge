@@ -1,6 +1,6 @@
 // In-memory transaction journal. Reopening the plugin intentionally clears undo history.
 const operationHistory = new Map();
-const SNAPSHOT_LIMIT = 24 * 1024 * 1024;
+const SNAPSHOT_LIMIT = 48 * 1024 * 1024;
 const snapshotSizes=new WeakMap();
 function traversalPause(){let deadline=Date.now()+8;return async index=>{if(index%32===0&&Date.now()>=deadline){if(typeof setTimeout==='function')await new Promise(resolve=>setTimeout(resolve,0));deadline=Date.now()+8;}};}
 async function snapshotRoots(ids){
@@ -13,6 +13,7 @@ async function snapshotRoots(ids){
  return {kind:'nodes',roots:[...roots.values()].filter(n=>{for(let p=n.parent;p;p=p.parent)if(roots.has(p.id))return false;return true;}).map(n=>n.id)};
 }
 async function snapshotScope(c){
+ const structural=await structuralSnapshotScope(c);if(structural)return structural;
  if(['update-node','set-text-ranges','set-reactions','set-variable-mode','apply-auto-layout'].includes(c.type))return snapshotRoots([c.nodeId]);
  if(['variable-action','style-action','create-variable-collection'].includes(c.type)||c.type==='design-system'&&['collection','variable','text-style','effect-style'].includes(c.action))return {kind:'resources'};
  if(c.type==='repair-layout'){const review=visualReviews.get(c.reviewId);return review?.state.scope||null;}
@@ -22,6 +23,64 @@ async function snapshotScope(c){
   if(scopes.every(s=>s.kind==='nodes'))return snapshotRoots(scopes.flatMap(s=>s.roots));
  }
  return null; // Structural/unknown writes keep the broader conservative snapshot.
+}
+// Structural operations need parent order and affected roots, not every inherited
+// instance descendant. Auto-layout/group dependencies still receive full snapshots.
+async function structuralSnapshotScope(command){
+ const steps=command.type==='batch'?command.commands:[command];
+ const supported=new Set(['create-node','build-section','clone-node','move-node','reorder-node']);
+ if(!Array.isArray(steps)||!steps.length||steps.some(c=>!supported.has(c.type)||JSON.stringify(c).includes('"$ref"')))return null;
+ const page=await commandPage(command),containers=new Set(),targets=new Set(),deep=new Set();
+ async function parentScope(parent){
+  if(!parent)throw Error('Structural snapshot parent missing');
+  containers.add(parent.id);
+  for(let n=parent;n&&!['PAGE','DOCUMENT'].includes(n.type);n=n.parent){
+   if(n.type==='GROUP'||n.layoutMode&&n.layoutMode!=='NONE')deep.add(n.id);
+  }
+ }
+ for(const c of steps){
+  if(c.type==='create-node'||c.type==='build-section'){
+   await parentScope(c.parentId?await apiNode(c.parentId):page);
+   // Figma initially places factory-created roots on the page.
+   containers.add(page.id);
+  }else{
+   const node=await apiNode(c.nodeId);await parentScope(node.parent);
+   if(c.type!=='clone-node')targets.add(node.id);
+   if(c.type!=='reorder-node')await parentScope(c.parentId?await apiNode(c.parentId):node.parent);
+   if(c.type==='clone-node')containers.add(page.id);
+  }
+ }
+ const deepRoots=deep.size?(await snapshotRoots([...deep])).roots:[];
+ const baseline={};for(const id of containers)baseline[id]=(await apiNode(id)).children.map(n=>n.id);
+ return {kind:'structure',containers:[...containers],targets:[...targets],deepRoots,baseline};
+}
+async function subtreeFingerprint(root){
+ const stack=[root],pause=traversalPause();let a=2166136261,b=2246822519,count=0,length=0;
+ while(stack.length){const n=stack.pop(),text=JSON.stringify(nodeSnapshot(n));length+=text.length;
+  for(let i=0;i<text.length;i++){const code=text.charCodeAt(i);a=Math.imul(a^code,16777619);b=Math.imul(b^code,3266489917);}
+  const children=n.children||[];for(let i=children.length-1;i>=0;i--)stack.push(children[i]);await pause(++count);
+ }
+ return count+':'+length+':'+(a>>>0).toString(16)+':'+(b>>>0).toString(16);
+}
+async function captureStructuralState(command,enforceLimit,scope){
+ const nodes=[],seen=new Set(),created=new Set(),pause=traversalPause();let size=JSON.stringify(scope).length*2,index=0;
+ if(enforceLimit&&size>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 48 MiB; split the operation before writing');
+ async function save(node,deep=false){
+  if(seen.has(node.id))return;seen.add(node.id);const value=nodeSnapshot(node);
+  if(scope.containers.includes(node.id))value.childOrder=node.children.map(n=>n.id);
+  if(created.has(node.id))value.subtreeFingerprint=await subtreeFingerprint(node);
+  nodes.push(value);size+=JSON.stringify(value).length*2;
+  if(enforceLimit&&size>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 48 MiB; split the operation before writing');
+  if(deep)for(const child of node.children||[])await save(child,true);
+  await pause(++index);
+ }
+ const known=new Set([...Object.values(scope.baseline).flat(),...scope.targets]);
+ const parents=[];for(const id of scope.containers){const parent=await apiNode(id);parents.push(parent);for(const child of parent.children)if(!known.has(child.id))created.add(child.id);}
+ for(const id of scope.deepRoots){const n=await figma.getNodeByIdAsync(id);if(n)await save(n,true);}
+ for(const n of parents)await save(n);
+ for(const id of scope.targets){const n=await figma.getNodeByIdAsync(id);if(n)await save(n);}
+ for(const id of created){const n=await figma.getNodeByIdAsync(id);if(n)await save(n);}
+ const state={nodes,scope};snapshotSizes.set(state,size);return state;
 }
 const snapshotFields = [...API_CONTRACT.nodeProperties.filter(k=>k!=='gridPosition'),'reactions','explicitVariableModes','name','visible','locked','x','y','width','height','relativeTransform','fills','strokes','strokeWeight','strokeAlign','opacity','effects','cornerRadius','topLeftRadius','topRightRadius','bottomLeftRadius','bottomRightRadius','clipsContent','fontName','fontSize','characters','textAlignHorizontal','textAlignVertical','textAutoResize','lineHeight','letterSpacing','layoutMode','layoutSizingHorizontal','layoutSizingVertical','layoutGrow','layoutAlign','layoutPositioning','paddingLeft','paddingRight','paddingTop','paddingBottom','itemSpacing','primaryAxisAlignItems','counterAxisAlignItems','primaryAxisSizingMode','counterAxisSizingMode','description','textStyleId','effectStyleId','boundVariables','vectorPaths','textTruncation','maxLines','minWidth','minHeight','maxWidth','maxHeight','constraints'];
 const segmentFields=['fontName','fontSize','fills','lineHeight','letterSpacing','textDecoration','textCase','textStyleId','fillStyleId','hyperlink','listOptions','listSpacing','indentation','paragraphIndent','paragraphSpacing'];
@@ -34,12 +93,13 @@ function nodeSnapshot(n){
  return {id:n.id,type:n.type,parentId:n.parent?.id,index:n.parent?.children?.indexOf(n),path:nodePath(n),props,logicalKey:n.getPluginData?.('bridge.logicalKey')||'',segments:n.type==='TEXT'?cloneValue(n.getStyledTextSegments(segmentFields)):undefined};
 }
 async function captureState(command,enforceLimit=true,scope=null){
+ if(scope?.kind==='structure')return captureStructuralState(command,enforceLimit,scope);
  const page=await commandPage(command),file=command.target?.scope==='file';
  if(file&&!scope)await figma.loadAllPagesAsync();
  const roots=scope?.kind==='resources'?[]:scope?.kind==='nodes'?(await Promise.all(scope.roots.map(id=>figma.getNodeByIdAsync(id)))).filter(Boolean):file?figma.root.children:[page];
  const nodes=[],stack=[...roots].reverse(),seen=new Set(),pause=traversalPause();let size=0,index=0;
  while(stack.length){const n=stack.pop();if(seen.has(n.id))continue;seen.add(n.id);const saved=nodeSnapshot(n);nodes.push(saved);size+=JSON.stringify(saved).length*2;
-  if(enforceLimit&&size>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 24 MiB; split the operation before writing');
+  if(enforceLimit&&size>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 48 MiB; split the operation before writing');
   const children=n.children||[];for(let i=children.length-1;i>=0;i--)stack.push(children[i]);await pause(++index);
  }
  const state={nodes,...(scope?{scope}:{} )},resources=file&&(!scope||scope.kind==='resources');
@@ -51,7 +111,7 @@ async function captureState(command,enforceLimit=true,scope=null){
  }
  if(resources&&figma.editorType==='figma'){for(const [field,method,properties] of [['paintStyles','getLocalPaintStylesAsync',['name','description','paints']],['gridStyles','getLocalGridStylesAsync',['name','description','layoutGrids']]]){if(typeof figma[method]!=='function')continue;state[field]=(await figma[method]()).map(v=>({id:v.id,...Object.fromEntries(properties.filter(k=>v[k]!==undefined).map(k=>[k,cloneValue(v[k])]))}));}}
  for(const field of Object.keys(state))if(!['nodes','scope'].includes(field))for(const item of state[field]){size+=JSON.stringify(item).length*2;await pause(++index);}
- if(enforceLimit&&size>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 24 MiB; split the operation before writing');
+ if(enforceLimit&&size>SNAPSHOT_LIMIT)throw Error('Snapshot exceeds 48 MiB; split the operation before writing');
  snapshotSizes.set(state,size);
  return state;
 }
@@ -70,7 +130,13 @@ async function restoreState(before,command,progress=()=>{},currentState=null){
   const n=await figma.getNodeByIdAsync(s.id);
   if(s.parentId)await attempt('parent:'+s.id,async()=>{const parent=await figma.getNodeByIdAsync(s.parentId);if(n.parent?.id!==s.parentId||parent.children.indexOf(n)!==s.index)parent.insertChild(Math.min(s.index,parent.children.length),n);});
  }
- for(const s of [...now.nodes].reverse())if(!ids.has(s.id))await attempt('remove:'+s.id,async()=>{const n=await figma.getNodeByIdAsync(s.id);if(n&&!n.removed)n.remove();});
+ const added=new Set(now.nodes.filter(s=>!ids.has(s.id)).map(s=>s.id));
+ // Removing an added root removes its descendants. Inherited instance children
+ // cannot be removed individually in Figma and must never be replayed as deletes.
+ for(const s of [...now.nodes].reverse())if(added.has(s.id)&&!added.has(s.parentId))await attempt('remove:'+s.id,async()=>{const n=await figma.getNodeByIdAsync(s.id);if(n&&!n.removed)n.remove();});
+ for(const s of before.nodes)if(s.childOrder)await attempt('order:'+s.id,async()=>{
+  const parent=await apiNode(s.id);for(const [i,id] of s.childOrder.entries()){const child=await apiNode(id);if(child.parent?.id!==parent.id||parent.children[i]?.id!==id)parent.insertChild(i,child);}
+ });
  // Reparenting and removals can change auto-layout. Compare after restoring topology.
  const aligned=topologyChanged?new Map((await captureState(command,false,before.scope)).nodes.map(n=>[n.id,n])):current;
  const changedNodes=before.nodes.filter(s=>{const a=aligned.get(s.id);return a&&(canonical(a.props)!==canonical(s.props)||canonical(a.segments)!==canonical(s.segments)||a.logicalKey!==s.logicalKey);});
@@ -118,6 +184,8 @@ async function stateDiff(before,after){
    const properties=[];for(const key of new Set([...Object.keys(a?.props||a||{}),...Object.keys(b?.props||b||{})])){const x=(a?.props||a)?.[key],y=(b?.props||b)?.[key];if(canonical(x)!==canonical(y))properties.push({property:key,before:x??null,after:y??null});}
    if(a&&b&&a.index!==b.index)properties.push({property:'index',before:a.index,after:b.index});
    if(a&&b&&a.parentId!==b.parentId)properties.push({property:'parentId',before:a.parentId,after:b.parentId});
+   if(a&&b&&canonical(a.childOrder)!==canonical(b.childOrder))properties.push({property:'childOrder',before:a.childOrder,after:b.childOrder});
+   if(a&&b&&a.subtreeFingerprint!==b.subtreeFingerprint)properties.push({property:'subtreeFingerprint',before:a.subtreeFingerprint,after:b.subtreeFingerprint});
    if(a&&b&&canonical(a.segments)!==canonical(b.segments))properties.push({property:'textSegments',before:a.segments,after:b.segments});
    changes.push({id,kind:field,path:b?.path||a?.path||b?.name||a?.name,action:!a?'create':!b?'remove':'update',properties});
   }
