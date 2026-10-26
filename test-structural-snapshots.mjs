@@ -62,3 +62,35 @@ const layout=figma.createFrame();layout.layoutMode='HORIZONTAL';const a=figma.cr
 const layoutOrder=await ok({type:'reorder-node',nodeId:a.id,index:1});assert.ok(nodeCount()>=3);
 b.x=12;assert.match((await command({type:'undo-operation',operationId:layoutOrder.operationId})).error,/conflict/);b.x=0;await ok({type:'undo-operation',operationId:layoutOrder.operationId});
 console.log('PASS compact structural snapshots: 1000 inherited descendants read 0 times; reorder history '+reorderBytes+' bytes; placement undo preserves overrides; created-subtree conflict and protected-child rollback pass');
+
+// Crossing a deep snapshot boundary must retain existing descendants in both
+// snapshots. Otherwise undo mistakes them for newly created nodes and deletes them.
+for(const direction of ['into','out-of'])for(const batched of [false,true]){
+ const manual=figma.createFrame(),auto=figma.createFrame();auto.layoutMode='HORIZONTAL';
+ const root=figma.createFrame(),nested=figma.createFrame(),leaf=figma.createRectangle();
+ root.appendChild(nested);nested.appendChild(leaf);
+ const source=direction==='into'?manual:auto,destination=direction==='into'?auto:manual;
+ source.appendChild(root);const ids=[root.id,nested.id,leaf.id];
+ const move={type:'move-node',nodeId:root.id,parentId:destination.id};
+ const result=await ok(batched?{type:'batch',commands:[move]}:move);
+ await ok({type:'undo-operation',operationId:result.operationId});
+ assert.equal(root.parent,source);assert.equal(nested.parent,root);assert.equal(leaf.parent,nested);
+ for(const id of ids)assert.ok(registry.has(id),'Existing descendant lost on '+direction+' undo');
+}
+console.log('PASS deep-boundary moves: into/out of auto-layout, standalone and batch undo preserve nested descendants');
+
+// The same scope must protect later descendant edits and failed batches.
+{
+ const manual=figma.createFrame(),auto=figma.createFrame();auto.layoutMode='HORIZONTAL';
+ const root=figma.createFrame(),leaf=figma.createRectangle();manual.appendChild(root);root.appendChild(leaf);
+ const moved=await ok({type:'move-node',nodeId:root.id,parentId:auto.id});
+ leaf.x=42;assert.match((await command({type:'undo-operation',operationId:moved.operationId})).error,/conflict/);
+ leaf.x=0;await ok({type:'undo-operation',operationId:moved.operationId});
+ const marker=figma.createRectangle();auto.appendChild(marker);
+ const insert=auto.insertChild.bind(auto);auto.insertChild=(i,n)=>{if(n===marker)throw Error('Injected boundary failure');return insert(i,n);};
+ const failed=await command({type:'batch',commands:[{type:'move-node',nodeId:root.id,parentId:auto.id},{type:'reorder-node',nodeId:marker.id,index:0}]});
+ auto.insertChild=insert;
+ assert.equal(failed.ok,false);assert.equal(failed.details.rollback.ok,true,JSON.stringify(failed));
+ assert.equal(root.parent,manual);assert.ok(registry.has(leaf.id));assert.equal(leaf.parent,root);
+}
+console.log('PASS deep-boundary descendant conflict protection and failed-batch rollback');

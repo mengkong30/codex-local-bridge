@@ -50,7 +50,9 @@ async function structuralSnapshotScope(command){
    if(c.type==='clone-node')containers.add(page.id);
   }
  }
- const deepRoots=deep.size?(await snapshotRoots([...deep])).roots:[];
+ // A moved subtree can enter or leave a deep dependency. Keep its root in
+ // both captures even when an ancestor already covers it before the write.
+ const deepRoots=deep.size?[...new Set([...(await snapshotRoots([...deep])).roots,...targets])]:[];
  const baseline={};for(const id of containers)baseline[id]=(await apiNode(id)).children.map(n=>n.id);
  return {kind:'structure',containers:[...containers],targets:[...targets],deepRoots,baseline};
 }
