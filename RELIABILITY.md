@@ -25,13 +25,13 @@ Retention: keys/results are in service memory for 24 hours after completion, max
 ]}
 ```
 
-File binding is required if any nested step changes file resources. Up to 100 individual write steps; no nested batch, explicit step routing, undo, or non-undoable operations. `$ref` resolves result fields from an earlier `stepId`. In 0.8.2, simple edits snapshot their dependency roots, resource-only commands snapshot resources, and structural/complex batches retain the bound page (or full file/resource) snapshot. Failures restore original values/topology and remove creations, then compare restoration against the snapshot.
+File binding is required if any nested step changes file resources. Up to 100 individual write steps; no nested batch, explicit step routing, undo, or non-undoable operations. `$ref` resolves result fields from an earlier `stepId`. In 0.8.2, simple edits snapshot their dependency roots and resource-only commands snapshot resources. The unreleased structural optimization scopes supported structural batches to their containers and affected roots; mixed/result-reference batches retain the bound page (or full file/resource) snapshot. Failures restore original values/topology and remove creations, then compare restoration against the snapshot.
 
 ## Undo
 
 `{type:"undo-operation", operationId:"...", dryRun:true}` previews reverse diff. Remove dryRun to restore. MCP has `local_figma_undo`; DSH has `undo <operationId>`. Undo checks the saved after-state against the live scope first: later AI/user modifications cause a conflict, with no overwrite. Page operations can be undone from the same page binding or file binding; file operations require exclusive file scope. Latest compatible state must match; reverse sequential batches in reverse order.
 
-History is local to the running Figma plugin, max 20 writes / 48 MiB total snapshots; an individual snapshot is limited to 24 MiB. Reopening clears it. `operation-history` lists retained IDs. This is intentionally separate from Figma's native undo history (`commitUndo` marks successful bridge operations).
+History is local to the running Figma plugin, max 20 writes / 96 MiB total snapshots; an individual snapshot is limited to 48 MiB. Reopening clears it. `operation-history` lists retained IDs. This is intentionally separate from Figma's native undo history (`commitUndo` marks successful bridge operations).
 
 Supported: node build/update, high-level templates, auto-layout, pages, variables/collections, text/effect styles, variable/style bindings, descriptions, clone-component and replace-instance. `replace-instance` creates an instance and **hides/renames** the source to 原始备份; undo removes the new instance and restores source visibility/name.
 
@@ -39,7 +39,9 @@ Non-undoable: image-store insertion, component property definitions, and variant
 
 ## 0.8.2 快照范围与响应性
 
-普通 update-node、set-text-ranges、set-reactions、set-variable-mode、apply-auto-layout 保存目标子树；父级为自动布局时向上扩展连续自动布局祖先，以覆盖子项重排和尺寸变化。简单 batch 合并这些依赖。变量/样式命令只保存资源。结构修改、包含结果引用或混合范围的复杂批次仍使用页面/文件快照。
+普通 update-node、set-text-ranges、set-reactions、set-variable-mode、apply-auto-layout 保存目标子树；父级为自动布局时向上扩展连续自动布局祖先，以覆盖子项重排和尺寸变化。简单 batch 合并这些依赖。变量/样式命令只保存资源。
+
+本地结构快照优化：create-node、build-section、clone-node、move-node、reorder-node 以及仅含这些操作且不带结果引用的批次，保存相关父容器的子节点顺序和受影响根节点，不展开手动布局实例的继承子层。自动布局和 GROUP 祖先仍完整保存必要依赖；存在这些依赖时，移动目标根也始终在前后快照中完整保存，即使操作前已被祖先覆盖，防止跨入/跨出依赖范围时误删原有子层。新增子树使用流式指纹保护撤销冲突，指纹不保存整份子树数据；回滚只移除新增根节点，不直接删除实例继承子层。包含结果引用、其他操作或混合范围的复杂批次仍使用保守的页面/文件快照。运行时通过 api.performance.structuralSnapshots=1 标识此优化。
 
 撤销只检查和恢复该依赖范围，范围内后续修改仍返回冲突；范围外修改不再阻止撤销，也不会被恢复覆盖。视觉回执保存审查根、明确纳入的外部节点和布局依赖，另有 16 MiB 估算保留预算。扫描和比较分批让出主线程，历史快照大小按 UTF-16 字符串长度估算并缓存；实际对象内存可能更高。
 
