@@ -25,7 +25,7 @@ Retention: keys/results are in service memory for 24 hours after completion, max
 ]}
 ```
 
-File binding is required if any nested step changes file resources. Up to 100 individual write steps; no nested batch, explicit step routing, undo, or non-undoable operations. `$ref` resolves result fields from an earlier `stepId`. In 0.8.2, simple edits snapshot their dependency roots and resource-only commands snapshot resources. The unreleased structural optimization scopes supported structural batches to their containers and affected roots; mixed/result-reference batches retain the bound page (or full file/resource) snapshot. Failures restore original values/topology and remove creations, then compare restoration against the snapshot.
+File binding is required if any nested step changes file resources. Up to 100 individual write steps; no nested batch, explicit step routing, undo, or non-undoable operations. `$ref` resolves result fields from an earlier `stepId`. In 0.8.2, simple edits snapshot their dependency roots and resource-only commands snapshot resources. The 0.8.3 structural optimization scopes supported structural batches to their containers and affected roots; mixed/result-reference batches retain the bound page (or full file/resource) snapshot. Failures restore original values/topology and remove creations, then compare restoration against the snapshot.
 
 ## Undo
 

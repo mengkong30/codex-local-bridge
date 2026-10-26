@@ -4,7 +4,7 @@ import os from 'node:os';
 import {spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 export const DEFAULT_PORTS=Array.from({length:8},(_,i)=>37821+i);
-export const VERSION='0.8.2';
+export const VERSION='0.8.3';
 export const stateDirectory=()=>process.env.BRIDGE_STATE_DIR||path.join(process.env.LOCALAPPDATA||path.join(os.homedir(),'.local','state'),'CodexLocalBridge');
 export function optionsFromEnv(env=process.env){const explicit=env.BRIDGE_PORT!==undefined,port=Number(env.BRIDGE_PORT||37821),profile=String(env.BRIDGE_PROFILE||(explicit?'port-'+port:'default')).toLowerCase();if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Invalid bridge port');if(!/^[\w.-]{1,60}$/.test(profile))throw Error('Invalid bridge profile');return {port,profile,ports:explicit?[port]:env.BRIDGE_DISCOVERY_PORTS?env.BRIDGE_DISCOVERY_PORTS.split(',').map(p=>{const v=Number(p);if(!Number.isInteger(v)||v<1024||v>65535)throw Error('Invalid discovery port');return v;}):DEFAULT_PORTS};}
 export async function probe(base,timeout=450){try{const r=await fetch(base+'/health',{signal:AbortSignal.timeout(timeout)});if(!r.ok)return null;const h=await r.json();if(!h.ok||h.serverName!=='codex-local-bridge'||h.protocolVersion!==2)return null;return {...h,endpoint:base};}catch{return null;}}

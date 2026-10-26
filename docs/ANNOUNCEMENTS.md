@@ -1,8 +1,8 @@
 # 更新公告
 
-## 2026-10-26 · 主分支结构快照优化与撤销修复
+## 2026-10-26 · 0.8.3 结构快照优化与撤销修复
 
-本次更新已纳入源码，尚未创建新 Release；Releases 的 v0.8.2 下载包不包含本次改动。需要本次修复时，请使用包含此更新的 main 源码，保留目录结构；运行代码已生成，无需构建。
+本次更新以 v0.8.3 提供源码及下载包；v0.8.2 下载包不包含本次改动。运行代码已生成，保留目录结构后导入 figma/manifest.json，无需构建。
 
 ### 有哪些变化
 
@@ -13,9 +13,9 @@
 
 ### 验证与升级
 
-15 组隔离测试与代码一致性检查通过，补测覆盖移动、撤销、失败回滚和后续编辑冲突。本轮使用模拟 Figma API，未完成真实编辑器及跨平台验收。
+15 组隔离测试与代码一致性检查通过，补测覆盖移动、撤销、失败回滚和后续编辑冲突。另完成 Windows Figma Desktop 126.9.16 Design 实机验收，双向撤销、子层保留、冲突保护及失败回滚均通过。[实机记录与边界](LIVE-VALIDATION-2026-10-26.md)。macOS、FigJam、Slides 和 Dev Inspect 未在本轮重新实测。
 
-先确认未完成请求的最终状态，再更新源码并重新运行 Figma 插件；重新打开插件会清空桥接撤销历史。包/服务仍为 0.8.2、runtime v11，需核对 `api.performance.structuralSnapshots = 1` 以及包含本次修复的源码提交；单看版本号不能区分本次更新。
+先确认未完成请求的最终状态，再更新源码并重新运行 Figma 插件；重新打开插件会清空桥接撤销历史。包/服务为 0.8.3、runtime v11，需核对 `api.performance.structuralSnapshots = 1` 以及 bridgePackageVersion/serverVersion 为 0.8.3。
 
 感谢 [tok-24](https://github.com/tok-24) 在 [PR #1](https://github.com/mengkong30/codex-local-bridge/pull/1) 中贡献初始结构快照优化。
 

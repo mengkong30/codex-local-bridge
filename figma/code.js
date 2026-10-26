@@ -945,7 +945,7 @@ function documentInfo(page = figma.currentPage) {
     editorType: figma.editorType,
     fileName: figma.root.name,
     bridgeVersion: 11,
-    bridgePackageVersion: '0.8.2',
+    bridgePackageVersion: '0.8.3',
     connectionSettings:bridgeSettings,
     panelProtocol: 1,
     pages: figma.root.children.map(p => ({id:p.id, name:p.name})),

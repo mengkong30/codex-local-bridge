@@ -2,7 +2,7 @@
 
 [首页](../README.md) · [能力范围](CAPABILITIES.md) · [可靠写入](../RELIABILITY.md)
 
-服务 / 包 0.8.2，runtime v11。先调用 local_figma_capabilities，再将下列对象放进 local_figma_command 的 command 字段，外层传 bindingId。connectionId、pageId、clientId、target 不放在 command 内。每个实际写入使用唯一 idempotencyKey；dry-run 使用另一个 key。
+服务 / 包 0.8.3，runtime v11。先调用 local_figma_capabilities，再将下列对象放进 local_figma_command 的 command 字段，外层传 bindingId。connectionId、pageId、clientId、target 不放在 command 内。每个实际写入使用唯一 idempotencyKey；dry-run 使用另一个 key。
 
 ## 命令一览
 

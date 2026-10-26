@@ -32,10 +32,10 @@
   <label for="connectionProfile">服务配置名称</label><input id="connectionProfile" value="default" maxlength="60" autocomplete="off" spellcheck="false"><p class="small muted">同名配置共享一个服务；不同名称用于独立实例。</p>
   <label for="connectionPort">端口</label><select id="connectionPort"></select>
   <div class="settings-actions"><button id="applySettings" type="button">保存并连接</button><button id="scanServices" type="button">重新发现</button><button id="checkVersion" type="button">检查版本</button></div><p id="settingsResult" role="status" aria-live="polite"></p>
-  <div class="settings-summary"><h2>当前连接</h2><dl><dt>本地地址</dt><dd id="settingsEndpoint">尚未连接</dd><dt>配置 / 实例</dt><dd id="settingsInstance">尚未连接</dd><dt>插件 / 服务</dt><dd id="settingsVersions">0.8.2 / 待连接</dd><dt>执行端</dt><dd id="settingsRuntime">待连接</dd></dl><p class="small muted">版本检查针对本机已安装版本和服务协议，不查询云端更新。</p></div>
+  <div class="settings-summary"><h2>当前连接</h2><dl><dt>本地地址</dt><dd id="settingsEndpoint">尚未连接</dd><dt>配置 / 实例</dt><dd id="settingsInstance">尚未连接</dd><dt>插件 / 服务</dt><dd id="settingsVersions">0.8.3 / 待连接</dd><dt>执行端</dt><dd id="settingsRuntime">待连接</dd></dl><p class="small muted">版本检查针对本机已安装版本和服务协议，不查询云端更新。</p></div>
   <p class="small muted" style="margin-top:16px">每个目标文件仍需运行插件。暂不支持创建新的 Figma 文件，可让 AI 在现有文件中新建页面。</p>
  </section>
- <footer class="footer hub-only"><span id="hubLocation">统一主控</span><span>插件 0.8.2 · 服务 <span id="serverVersion">待连接</span></span></footer>
+ <footer class="footer hub-only"><span id="hubLocation">统一主控</span><span>插件 0.8.3 · 服务 <span id="serverVersion">待连接</span></span></footer>
 </main>
 <script>
 let baseUrl='http://localhost:37821';const el=id=>document.getElementById(id);
@@ -67,13 +67,13 @@ async function discoverService(force=false){
   if(matching.length>1)throw Error('发现多个同名服务，请指定端口，避免误连。');
   const found=matching[0];
   if(serviceIdentity&&found.instanceId!==serviceIdentity&&(executing||delivering||blocked||state?.busy||state?.queueLength||state?.uncertain)){blocked=true;throw Error('服务实例已改变，未完成操作需先核对；不会自动切换目标。');}
-  if((found.apiProtocol!==1||found.recoveryProtocol!==1||found.discoveryProtocol!==1||found.controllerProtocol!==1||found.panelProtocol!==1||found.reliabilityProtocol!==1)&&initialPort===37821)throw Error('服务版本过旧，请更新到 0.8.2；当前服务 '+found.serverVersion);
+  if((found.apiProtocol!==1||found.recoveryProtocol!==1||found.discoveryProtocol!==1||found.controllerProtocol!==1||found.panelProtocol!==1||found.reliabilityProtocol!==1)&&initialPort===37821)throw Error('服务版本过旧，请更新到 0.8.3；当前服务 '+found.serverVersion);
   baseUrl=found.endpoint;serviceIdentity=found.instanceId;return found;
  })().finally(()=>{discovering=null;});return discovering;
 }
 function renderSettings(){
  el('localAddress').textContent=baseUrl.replace('http://','');el('settingsEndpoint').textContent=registered?baseUrl:'未连接 · '+baseUrl;
- el('settingsInstance').textContent=connectionSettings.profile+' / '+(serviceIdentity?.slice(0,8)||'待发现');el('settingsVersions').textContent='0.8.2 / '+(snapshot?.serverVersion||'待连接');el('settingsRuntime').textContent='v'+(documentData?.bridgeVersion||'?')+' · 需要 v11';
+ el('settingsInstance').textContent=connectionSettings.profile+' / '+(serviceIdentity?.slice(0,8)||'待发现');el('settingsVersions').textContent='0.8.3 / '+(snapshot?.serverVersion||'待连接');el('settingsRuntime').textContent='v'+(documentData?.bridgeVersion||'?')+' · 需要 v11';
  const busy=executing||delivering||state?.busy||state?.queueLength||state?.uncertain||registering;el('applySettings').disabled=!!busy;el('connectionPort').disabled=el('connectionMode').value!=='manual';
 }
 function showSettings(){settingsOpen=true;el('app').dataset.settings='true';el('settingsPanel').hidden=false;el('connectionMode').value=connectionSettings.mode;el('connectionProfile').value=connectionSettings.profile;el('connectionPort').value=String(connectionSettings.port);parent.postMessage({pluginMessage:{type:'bridge-settings-size',open:true}},'*');renderSettings();}

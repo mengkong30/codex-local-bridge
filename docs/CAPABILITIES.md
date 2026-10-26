@@ -1,6 +1,6 @@
 # 能力范围
 
-[返回首页](../README.md) · 插件包 / 服务 0.8.2 · Figma runtime v11
+[返回首页](../README.md) · 插件包 / 服务 0.8.3 · Figma runtime v11
 
 先调用 local_figma_capabilities。返回可用命令、统一属性白名单、文字范围字段、操作类型与编辑器信息。17 个 MCP 工具通过结构化命令执行；没有任意 JavaScript 执行接口。
 

@@ -18,7 +18,7 @@ const timer=setTimeout(()=>{for(const p of processes)p.kill();server.kill();proc
 try{
  for(let i=0;i<40;i++){try{if((await(await fetch(base+'/health')).json()).ok)break;}catch{}await new Promise(r=>setTimeout(r,50));}
  const connectionId=(await post('/hello',{protocolVersion:2,document:{fileName:'MCP fixture',bridgeVersion:9,pages:[{id:'p1',name:'桌面'},{id:'p2',name:'移动端'}]}})).connectionId;
- const a=mcp(),b=mcp();assert.equal((await a.rpc('initialize')).result.serverInfo.version,'0.8.2');
+ const a=mcp(),b=mcp();assert.equal((await a.rpc('initialize')).result.serverInfo.version,'0.8.3');
  const list=(await a.rpc('tools/list')).result.tools;assert.equal(list.length,17);
  assert.equal(list.find(t=>t.name==='local_figma_command').annotations.readOnlyHint,false);
  const aa=parse(await a.call('local_figma_bind',{connectionId,pageId:'p1',clientName:'桌面设计',aiName:'Codex'})).binding;

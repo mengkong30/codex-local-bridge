@@ -5,7 +5,7 @@ description: Connect AI to local Figma, inspect and edit native design layers, c
 
 # Codex Local Bridge
 
-Current package/service 0.8.2; Figma runtime v11; expanded API protocol 1. Use the installed package's figma/manifest.json for Design/FigJam/Slides. Dev Inspect uses the separate figma/manifest-dev.json and is read-only. Do not claim all Figma features or all editors' APIs are covered.
+Current package/service 0.8.3; Figma runtime v11; expanded API protocol 1. Use the installed package's figma/manifest.json for Design/FigJam/Slides. Dev Inspect uses the separate figma/manifest-dev.json and is read-only. Do not claim all Figma features or all editors' APIs are covered.
 
 ## Connect and identify the target
 
@@ -13,9 +13,9 @@ Use local_figma_connect and local_figma_status. Require successful document read
 
 Call local_figma_capabilities before advanced commands. Inspect api.editor, api.actions, api.nodeProperties, api.rangeProperties and runtime version. Availability depends on Figma version, editor and file permissions. A known field can still be unavailable on the selected node; errors must be handled explicitly.
 
-For the 0.8.2 fixes, also verify the live document bridgePackageVersion is 0.8.2 and the service recoveryProtocol is 1. Reopening the manifest loads new code; runtime v11 alone cannot distinguish 0.8.0 from 0.8.2. Verify api.performance.protocol is 1. Ordinary edits snapshot their target/dependent auto-layout subtree, even under a file binding; resource commands snapshot resources only. Structural/complex writes retain a broader snapshot. Undo rejects changes within its saved dependency scope and preserves edits outside it. Late results must be queried in their original service/connection; never replay an uncertain write.
+For 0.8.3, verify live bridgePackageVersion/serverVersion are 0.8.3, service recoveryProtocol is 1, and api.performance.protocol and structuralSnapshots are 1. Runtime v11 alone does not identify this build. Ordinary edits save target/dependent auto-layout subtrees. Structural edits save container order and affected roots; auto-layout dependencies and moved subtrees crossing them are saved deeply. Undo rejects changes within saved dependencies and preserves changes outside them. Query late results in their original service/connection; never replay uncertain writes.
 
-Before any write, bind an exact connectionId/pageId with local_figma_bind, actual aiName and short clientName. Never reuse another task's binding. Use scope:file exclusively for global variables/styles/library import and Slides grid operations. Release idle page bindings before claiming the file.
+Before any write, bind an exact connectionId/pageId with local_figma_bind, actual aiName and short clientName. Never reuse another task's binding. Use scope:file exclusively for page creation, global variables/styles/library import and Slides grid operations. Release idle page bindings before claiming the file.
 
 Pass bindingId outside the local_figma_command command object. Never provide target/pageId/clientId/connectionId inside command; routing comes from the binding. Switching the visible page does not retarget the task. Bound writes may only affect their page; referenced components may live elsewhere in the same file.
 
@@ -35,7 +35,7 @@ For complex changes, start with dryRun:true and inspect the plan. Give each inte
 
 batch accepts individual writes, optional stepId and {$ref:"earlier.resultField"}. Command type/action must be literal strings; references cannot smuggle new command types. Routing is inherited. Atomic batches reject non-undoable operations and nested batches. Inspect failedStep and rollback.ok on failure.
 
-Supported snapshot undo is session-only, conflict checked, and retains the latest 20 operations within 48 MiB. local_figma_undo cannot recreate removed original IDs. Deletion, ungroup/boolean/flatten, instance overrides/swap/detach, resource removal/import and editor-specific metadata require allowNonUndoable:true. They return undo.supported:false and cannot enter an atomic batch; Figma native undo is the manual recovery path. When such an operation is already within the user's request, inspect its dry-run and set the explicit flag without asking the user to repeat authorization. Do not silently treat a failed operation as restored.
+Supported snapshot undo is session-only, conflict checked, and retains the latest 20 operations within a 96 MiB total snapshot budget (48 MiB per snapshot). local_figma_undo cannot recreate removed original IDs. Deletion, ungroup/boolean/flatten, instance overrides/swap/detach, resource removal/import and editor-specific metadata require allowNonUndoable:true. They return undo.supported:false and cannot enter an atomic batch; Figma native undo is the manual recovery path. When such an operation is already within the user's request, inspect its dry-run and set the explicit flag without asking the user to repeat authorization. Do not silently treat a failed operation as restored.
 
 ## Review the actual image
 
